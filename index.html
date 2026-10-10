@@ -132,13 +132,14 @@
         flex-wrap: wrap;
     }
 
-    .role-switch, .change-pass-link, .device-toggle-link, .logout-link {
+    .role-switch, .change-pass-link, .device-toggle-link, .logout-link, .price-mgmt-link {
         font-size: 13px;
         color: var(--ink-soft);
         text-decoration: underline;
         cursor: pointer;
         font-weight: 500;
     }
+    .price-mgmt-link { color: var(--sage-dark); font-weight: 600; }
     .device-toggle-link { color: var(--clay); font-weight: 600; }
     .logout-link { color: var(--alert); font-weight: 600; }
     .user-tag {
@@ -480,6 +481,19 @@
     .demo-row-locked { background: #F8E7E5; color: #933829; border: 1px solid #F0CBC6; }
     .demo-row-booked { background: var(--clay-soft); color: var(--clay); font-weight: 600; border: 1px solid #E5CEBA; }
 
+    .btn-clear-day {
+        width: 100%;
+        padding: 6px 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--alert);
+        background: #FDF5F5;
+        border: 1px dashed #E8B4B4;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+    .btn-clear-day:hover { background: var(--alert-soft); }
+
     .past-split-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .past-column-title {
         font-family: 'Fraunces', serif;
@@ -709,6 +723,7 @@
                 <div class="header-links">
                     <span class="user-tag" id="loggedUserDisplay">👤 Hoca</span>
                     <span class="role-switch" id="switchRoleLink">Yönetici Girişi</span>
+                    <span class="price-mgmt-link" id="openPriceModalLink" style="display:none;" onclick="openPriceModal()">🏷️ Fiyat Güncelle</span>
                     <span class="device-toggle-link" id="toggleDeviceBtn" onclick="toggleDeviceMode()">📱 Mobil Görünüm</span>
                     <span class="change-pass-link" id="openPassModalLink" style="display:none;">🔑 Şifre Değiştir</span>
                     <span class="logout-link" id="logoutBtn" onclick="handleLogout()">🚪 Çıkış Yap</span>
@@ -717,8 +732,7 @@
         </header>
 
         <div class="toolbar" id="hocaToolbar" style="display:none;">
-            <button class="btn-add" id="hocaDemoAddBtn">+ Üye Ekle (Demo)</button>
-            <button class="btn-ghost" id="hocaDirectAddBtn">+ Direkt Üye Ekle</button>
+            <button class="btn-add" id="hocaDemoAddBtn">+ Demo Seans Ekle</button>
             <button class="btn-ghost" id="hocaFreezeBtn">Üye Dondur</button>
         </div>
 
@@ -727,7 +741,7 @@
         <!-- ÜYELER SEKME -->
         <div class="view" id="view-members">
             <div class="controls">
-                <input class="search" id="searchInput" placeholder="İsim veya telefon ile ara..."/>
+                <input class="search" id="searchInput" placeholder="İsim ile ara..."/>
                 <div style="display:flex;gap:6px;overflow-x:auto;width:100%;scrollbar-width:none;">
                     <button class="filter-chip on" data-filter="all">Tümü</button>
                     <button class="filter-chip" data-filter="active">Aktif</button>
@@ -760,6 +774,10 @@
 
         <!-- DEMO PROGRAMI SEKME -->
         <div class="view" id="view-demoSchedule">
+            <div class="controls" style="justify-content:space-between;">
+                <button class="btn-add" id="demoGlobalAddBtn" onclick="openDemoAddModal('Pazartesi', '10:00', instructors[0]?.id)">+ Demo Seans Ekle</button>
+                <button class="btn-ghost" id="mobileClearDemoDayBtn" style="display:none;color:var(--alert);border-color:#E8B4B4;" onclick="clearSelectedMobileDemoDay()">🗑️ Seçili Günü Sıfırla</button>
+            </div>
             <div class="mobile-day-selector" id="mobileDemoDaySelector"></div>
             <div class="mobile-schedule-timeline" id="mobileDemoTimeline"></div>
             <div class="sched-table-wrap">
@@ -784,9 +802,9 @@
         <!-- STOK MULTİNET SEKME (Sadece Yönetici) -->
         <div class="view" id="view-multiStock">
             <div class="controls" style="justify-content:space-between;">
-                <p style="font-size:13.5px;color:var(--ink-soft);margin:0;">
+                <p style="font-size:13.5px;color:var(--ink-soft);margin:0;" id="multiStockHeaderDesc">
                     💳 <b>MultiSport Stok & Kart Çekim Yönetimi:</b> Kart elinizdeyken yapılan ekstra basımları buradan takip edebilir, 
-                    ister <b>200₺ Dengeleme</b> (4 basım kuralı) ister <b>400₺ Doğrudan Kasa Geliri</b> olarak aktarabilirsiniz.
+                    ister <b>Dengeleme</b> ister <b>Doğrudan Kasa Geliri</b> olarak aktarabilirsiniz.
                 </p>
             </div>
             <div id="multiStockListArea"></div>
@@ -823,6 +841,31 @@
     </div>
 
     <div class="overlay" id="overlay"></div>
+
+    <!-- FİYAT GÜNCELLEME PANELİ (SADECE YÖNETİCİ) -->
+    <div class="panel" id="pricePanel" style="width:480px;">
+        <h2>Fiyat Güncelleme</h2>
+        <p style="font-size:13px;color:var(--ink-soft);margin-top:-14px;margin-bottom:20px;">
+            Paket liste fiyatlarını ve MultiSport stok aktarım bedellerini buradan güncelleyebilirsiniz.
+        </p>
+        <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:10px 0 8px;">Paket Fiyatları (₺)</h4>
+        <div id="pricePackagesForm"></div>
+
+        <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:22px 0 8px;">MultiSport Stok Kuralları (₺)</h4>
+        <div class="field">
+            <label>Dengeleme Bedeli (₺ / Adet)</label>
+            <input type="number" id="p-cfg-balance" min="0" placeholder="200"/>
+        </div>
+        <div class="field">
+            <label>Direkt Kasa Bedeli (₺ / Adet)</label>
+            <input type="number" id="p-cfg-direct" min="0" placeholder="400"/>
+        </div>
+
+        <div class="panel-actions">
+            <button class="btn-secondary" id="priceCancelBtn">Vazgeç</button>
+            <button class="btn-primary" id="priceSaveBtn">Fiyatları Kaydet</button>
+        </div>
+    </div>
 
     <!-- ÜYE EKLE / DÜZENLE PANELİ -->
     <div class="panel" id="panel">
@@ -962,7 +1005,7 @@
 
     <script>
     // --- TEMEL VERİLER VE TANIMLAMALAR ---
-    const PACKAGES = [
+    let PACKAGES = [
         { name: "8 Seans Grup Reformer - 4'lü Grup", price: 4600, capacity: 4, sessions: 8, group: 'grup' },
         { name: "12 Seans Grup Reformer - 4'lü Grup", price: 6600, capacity: 4, sessions: 12, group: 'grup' },
         { name: "8 Seans Grup Reformer - 3'lü Grup", price: 5000, capacity: 3, sessions: 8, group: 'grup3' },
@@ -974,14 +1017,26 @@
         { name: "MultiSport Grup Reformer", price: 4000, capacity: 4, sessions: 8, group: 'grup', isMulti: true }
     ];
 
-    const PRICE_MAP = {};
-    const CAPACITY = {};
-    const SESSIONS_MAP = {};
-    PACKAGES.forEach(p => { 
-        PRICE_MAP[p.name] = p.price;
-        CAPACITY[p.name] = p.capacity;
-        SESSIONS_MAP[p.name] = p.sessions;
-    });
+    let multiConfig = {
+        balanceFee: 200,
+        directFee: 400
+    };
+
+    let PRICE_MAP = {};
+    let CAPACITY = {};
+    let SESSIONS_MAP = {};
+
+    function rebuildPackageMaps() {
+        PRICE_MAP = {};
+        CAPACITY = {};
+        SESSIONS_MAP = {};
+        PACKAGES.forEach(p => { 
+            PRICE_MAP[p.name] = p.price;
+            CAPACITY[p.name] = p.capacity;
+            SESSIONS_MAP[p.name] = p.sessions;
+        });
+    }
+    rebuildPackageMaps();
 
     const DAY_ORDER = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
     const JS_DOW = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
@@ -1016,7 +1071,7 @@
 
     const listArea = document.getElementById('listArea');
     const overlay = document.getElementById('overlay');
-    const ALL_PANEL_IDS = ['panel', 'paymentPanel', 'freezePanel', 'demoAddPanel', 'entryActionPanel', 'virtualCancelPanel', 'adminLoginPanel', 'changePassPanel', 'historyPanel', 'weekDetailPanel', 'monthDetailPanel'];
+    const ALL_PANEL_IDS = ['panel', 'paymentPanel', 'freezePanel', 'demoAddPanel', 'entryActionPanel', 'virtualCancelPanel', 'adminLoginPanel', 'changePassPanel', 'historyPanel', 'weekDetailPanel', 'monthDetailPanel', 'pricePanel'];
     const panels = ALL_PANEL_IDS.map(id => document.getElementById(id));
 
     function uid(p) { return p + '_' + Date.now() + '_' + Math.floor(Math.random() * 1000); }
@@ -1116,6 +1171,8 @@
     function savePastMonths() { cloudSet('pastMonths', pastMonths); }
     function saveLessonLog() { cloudSet('lessonLog', lessonLog); }
     function saveExtraRevenue() { cloudSet('extraRevenue', extraRevenueLog); }
+    function savePackages() { cloudSet('packages', PACKAGES); }
+    function saveMultiConfig() { cloudSet('multiConfig', multiConfig); }
     function storageSet(k, v) { cloudSet(k, v); }
     function storageGet(k) { 
         try { 
@@ -1140,6 +1197,8 @@
                     if (dbMap['pastMonths']) pastMonths = dbMap['pastMonths'];
                     if (dbMap['lessonLog']) lessonLog = dbMap['lessonLog'];
                     if (dbMap['extraRevenue']) extraRevenueLog = dbMap['extraRevenue'];
+                    if (dbMap['packages']) { PACKAGES = dbMap['packages']; rebuildPackageMaps(); }
+                    if (dbMap['multiConfig']) multiConfig = Object.assign(multiConfig, dbMap['multiConfig']);
                     if (dbMap['admin_password']) localStorage.setItem('app_admin_password', dbMap['admin_password']);
                 }
             } catch (e) {
@@ -1184,6 +1243,14 @@
         try { pastMonths = JSON.parse(localStorage.getItem('app_pastMonths') || '[]'); } catch (e) { pastMonths = []; }
         try { lessonLog = JSON.parse(localStorage.getItem('app_lessonLog') || '[]'); } catch (e) { lessonLog = []; }
         try { extraRevenueLog = JSON.parse(localStorage.getItem('app_extraRevenue') || '[]'); } catch (e) { extraRevenueLog = []; }
+        try {
+            const pk = JSON.parse(localStorage.getItem('app_packages') || 'null');
+            if (pk && Array.isArray(pk)) { PACKAGES = pk; rebuildPackageMaps(); }
+        } catch (e) {}
+        try {
+            const mc = JSON.parse(localStorage.getItem('app_multiConfig') || 'null');
+            if (mc) multiConfig = Object.assign(multiConfig, mc);
+        } catch (e) {}
     }
 
     function listenLiveUpdates() {
@@ -1201,13 +1268,15 @@
                     if (k === 'pastMonths') pastMonths = v;
                     if (k === 'lessonLog') lessonLog = v;
                     if (k === 'extraRevenue') extraRevenueLog = v;
+                    if (k === 'packages') { PACKAGES = v; rebuildPackageMaps(); }
+                    if (k === 'multiConfig') multiConfig = v;
                     renderCurrentView();
                 }
             })
             .subscribe();
     }
 
-    // --- GİRİŞ MOTORU (HER KOŞULDA ÇALIŞIR) ---
+    // --- GİRİŞ MOTORU ---
     function checkAuth() {
         const storedUser = localStorage.getItem('app_logged_user');
         if (storedUser) {
@@ -1231,7 +1300,6 @@
             return;
         }
 
-        // 1. Yönetici Girişi Kontrolü
         if (u.toLowerCase() === 'admin') {
             const adminP = getAdminPassword();
             if (p === adminP || p === 'admin') {
@@ -1247,7 +1315,6 @@
             }
         }
 
-        // 2. Eğitmen Girişi Kontrolü
         const matched = instructors.find(i => 
             i.name.toLowerCase() === u.toLowerCase() && 
             (String(i.pass || '1234') === p)
@@ -1326,12 +1393,52 @@
         closeAllPanels();
     });
 
+    /* FİYAT GÜNCELLEME MODÜLÜ */
+    window.openPriceModal = function() {
+        if (role !== 'sahibi') return;
+        const formWrap = document.getElementById('pricePackagesForm');
+        formWrap.innerHTML = PACKAGES.map((p, idx) => `
+            <div class="field" style="margin-bottom:10px;">
+                <label style="margin-bottom:3px;">${escapeHtml(p.name)}</label>
+                <input type="number" id="p-price-input-${idx}" value="${p.price}" min="0"/>
+            </div>
+        `).join('');
+
+        document.getElementById('p-cfg-balance').value = multiConfig.balanceFee ?? 200;
+        document.getElementById('p-cfg-direct').value = multiConfig.directFee ?? 400;
+        openPanel('pricePanel');
+    };
+
+    document.getElementById('priceCancelBtn').addEventListener('click', closeAllPanels);
+    document.getElementById('priceSaveBtn').addEventListener('click', () => {
+        PACKAGES.forEach((p, idx) => {
+            const val = parseFloat(document.getElementById(`p-price-input-${idx}`).value);
+            if (!isNaN(val) && val >= 0) p.price = val;
+        });
+
+        const balVal = parseFloat(document.getElementById('p-cfg-balance').value);
+        const dirVal = parseFloat(document.getElementById('p-cfg-direct').value);
+        if (!isNaN(balVal) && balVal >= 0) multiConfig.balanceFee = balVal;
+        if (!isNaN(dirVal) && dirVal >= 0) multiConfig.directFee = dirVal;
+
+        rebuildPackageMaps();
+        savePackages();
+        saveMultiConfig();
+        alert('Fiyatlar başarıyla güncellendi!');
+        closeAllPanels();
+        renderCurrentView();
+    });
+
     function showApp() {
         const isOwner = role === 'sahibi';
         document.getElementById('switchRoleLink').textContent = isOwner ? 'Eğitmen Ekranına Dön' : 'Yönetici Girişi';
         document.getElementById('openPassModalLink').style.display = isOwner ? 'inline-block' : 'none';
+        document.getElementById('openPriceModalLink').style.display = isOwner ? 'inline-block' : 'none';
         document.getElementById('hocaToolbar').style.display = !isOwner ? 'flex' : 'none';
         
+        // Eğitmende Üye Ekle butonunu gizle (Sadece yöneticide açık)
+        document.getElementById('openAddBtn').style.display = isOwner ? 'block' : 'none';
+
         document.getElementById('f-fee-wrap').style.display = isOwner ? 'block' : 'none';
         document.getElementById('p-fee-wrap').style.display = isOwner ? 'block' : 'none';
 
@@ -1441,7 +1548,7 @@
     function render() {
         renderStats();
         let filtered = members.filter(m => {
-            const matchesSearch = !searchTerm || m.name.toLowerCase().includes(searchTerm) || (m.phone || '').includes(searchTerm);
+            const matchesSearch = !searchTerm || m.name.toLowerCase().includes(searchTerm) || (role === 'sahibi' && (m.phone || '').includes(searchTerm));
             let matchesFilter = true;
             if (currentFilter === 'active') matchesFilter = statusOf(m) === 'active';
             else if (currentFilter === 'low') matchesFilter = m.remaining <= 2 && m.remaining > 0;
@@ -1451,7 +1558,7 @@
         });
 
         if (!members.length) {
-            listArea.innerHTML = '<div class="empty"><div class="big">Henüz üye yok</div>"+ Üye Ekle" ile başlayabilirsiniz.</div>';
+            listArea.innerHTML = '<div class="empty"><div class="big">Henüz üye yok</div></div>';
             return;
         }
 
@@ -1473,7 +1580,7 @@
                 <div class="row">
                   <div>
                     <div class="m-name">${escapeHtml(m.name)}</div>
-                    <div class="m-phone">${escapeHtml(m.phone || '')}</div>
+                    ${isOwner ? `<div class="m-phone">${escapeHtml(m.phone || '')}</div>` : ''}
                     ${schedDetail ? `<div class="m-sched-sub">${escapeHtml(schedDetail)}</div>` : ''}
                   </div>
                   <div class="m-pkg">
@@ -1484,7 +1591,7 @@
                     <button class="btn-step" onclick="changeSession('${m.id}', -1)" title="Seans Düş">-</button>
                     <span class="sessions ${st === 'low' || st === 'done' ? 'low' : ''}">${m.remaining} / ${totalPackSessions}</span>
                     <button class="btn-step" onclick="changeSession('${m.id}', 1)" title="Seans Ekle">+</button>
-                    ${isMulti && isOwner ? `<button class="btn-multi-read" onclick="handleMultiOkut('${m.id}')" title="200 TL Kasaya Direkt Gelir Yazar">📱 Multi Okut (${m.multiBalanced || 0}/4)</button>` : ''}
+                    ${isMulti && isOwner ? `<button class="btn-multi-read" onclick="handleMultiOkut('${m.id}')" title="${multiConfig.balanceFee} TL Kasaya Direkt Gelir Yazar">📱 Multi Okut (${m.multiBalanced || 0}/4)</button>` : ''}
                   </div>
                   <div>
                     <span class="badge ${st}">${st === 'active' ? 'Aktif' : st === 'low' ? 'Azalıyor' : 'Bitti'}</span>
@@ -1492,9 +1599,11 @@
                   </div>
                   <div class="row-actions">
                     <button class="icon-btn" onclick="openHistory('${m.id}')">Geçmiş</button>
+                    ${isOwner ? `
                     <button class="icon-btn" onclick="openPayment('${m.id}')">Yeni Paket</button>
                     <button class="icon-btn" onclick="openEdit('${m.id}')">Düzenle</button>
                     <button class="icon-btn danger" onclick="deleteMember('${m.id}')">Sil</button>
+                    ` : ''}
                   </div>
                 </div>`;
         });
@@ -1502,19 +1611,29 @@
         listArea.innerHTML = html;
     }
 
-    /* Multi Okut Butonu */
+    /* Multi Okut Butonu - 4/4 Sınırı (Sonrasında sıfırlanır) */
     window.handleMultiOkut = function(memberId) {
         const m = members.find(x => x.id === memberId);
         if (!m) return;
-        m.multiBalanced = (m.multiBalanced || 0) + 1;
+        
+        let currentB = m.multiBalanced || 0;
+        if (currentB >= 4) {
+            alert(`${m.name} için 4/4 tamamlanmıştı. Sayaç sıfırlanarak 1/4 olarak yeniden başlatıldı.`);
+            m.multiBalanced = 1;
+        } else {
+            m.multiBalanced = currentB + 1;
+        }
+
+        const balFee = multiConfig.balanceFee || 200;
         extraRevenueLog.push({
             id: uid('ex'),
             memberId: m.id,
             memberName: m.name,
-            amount: 200,
+            amount: balFee,
             date: todayStr(),
-            note: `MultiSport 200₺ Dengeleme Okutması (${m.multiBalanced}/4)`
+            note: `MultiSport ${balFee}₺ Dengeleme Okutması (${m.multiBalanced}/4)`
         });
+
         if (m.frozenUntil) delete m.frozenUntil;
         saveExtraRevenue();
         saveMembers();
@@ -1528,6 +1647,13 @@
         const wrap = document.getElementById('multiStockListArea');
         const multiMembers = members.filter(m => m.type === "MultiSport Grup Reformer");
 
+        const balFee = multiConfig.balanceFee || 200;
+        const dirFee = multiConfig.directFee || 400;
+
+        document.getElementById('multiStockHeaderDesc').innerHTML = `
+            💳 <b>MultiSport Stok & Kart Çekim Yönetimi:</b> Kart elinizdeyken yapılan ekstra basımları buradan takip edebilir, 
+            ister <b>${balFee}₺ Dengeleme</b> (4 basım kuralı) ister <b>${dirFee}₺ Doğrudan Kasa Geliri</b> olarak aktarabilirsiniz.`;
+
         if (!multiMembers.length) {
             wrap.innerHTML = '<div class="empty"><div class="big">Kayıtlı MultiSport Üyesi Yok</div>Üyeler bölümünden "MultiSport Grup Reformer" paketiyle üye ekleyebilirsiniz.</div>';
             return;
@@ -1538,8 +1664,8 @@
               <div class="row head" style="grid-template-columns:1.8fr 1.1fr 1.3fr 1.3fr;">
                 <div>MultiSport Üyesi & Durum Özeti</div>
                 <div style="text-align:center;">Kart Stok Havuzu (0/15)</div>
-                <div style="text-align:center;">Dengelemeye Aktar (200₺)</div>
-                <div style="text-align:right;">Direkt Kasaya Çek (400₺)</div>
+                <div style="text-align:center;">Dengelemeye Aktar (${balFee}₺)</div>
+                <div style="text-align:right;">Direkt Kasaya Çek (${dirFee}₺)</div>
               </div>`;
 
         multiMembers.forEach(m => {
@@ -1563,12 +1689,12 @@
                   </div>
                   <div style="text-align:center;">
                     <button class="btn-ghost" onclick="transferStockToBalance('${m.id}')" style="background:#FAF5EE;border-color:var(--clay);color:var(--clay);font-weight:600;font-size:12px;padding:7px 10px;width:100%;" ${stock <= 0 ? 'disabled style="opacity:0.4;"' : ''}>
-                      🔄 1 Adet Dengele (+200₺)
+                      🔄 1 Adet Dengele (+${balFee}₺)
                     </button>
                   </div>
                   <div style="display:flex;justify-content:flex-end;gap:5px;">
                     <button class="btn-add" onclick="transferStockDirectToCash('${m.id}')" style="background:var(--sage-dark);font-size:12px;padding:7px 12px;" ${stock <= 0 ? 'disabled style="opacity:0.4;"' : ''}>
-                      💰 Kasaya Çek (400₺)
+                      💰 Kasaya Çek (${dirFee}₺)
                     </button>
                   </div>
                 </div>`;
@@ -1592,19 +1718,22 @@
         const m = members.find(x => x.id === memberId);
         if (!m || (m.multiStock || 0) <= 0) return alert('Stokta basım bulunmuyor.');
 
-        if ((m.multiBalanced || 0) >= 4) {
-            if (!confirm(`${m.name} için 4 adet dengeleme basımı zaten tamamlanmış görünüyor (${m.multiBalanced}/4).\nYine de stoktan 1 basım düşüp 200 TL dengeleme olarak kasaya aktarmak istiyor musunuz?`)) {
-                return;
-            }
+        const balFee = multiConfig.balanceFee || 200;
+        let currentB = m.multiBalanced || 0;
+
+        if (currentB >= 4) {
+            alert(`${m.name} için 4/4 tamamlanmıştı. Sayaç sıfırlanarak 1/4 olarak yeniden başlatıldı.`);
+            m.multiBalanced = 1;
+        } else {
+            m.multiBalanced = currentB + 1;
         }
 
         m.multiStock -= 1;
-        m.multiBalanced = (m.multiBalanced || 0) + 1;
         extraRevenueLog.push({
             id: uid('ex'),
             memberId: m.id,
             memberName: m.name,
-            amount: 200,
+            amount: balFee,
             date: todayStr(),
             note: `MultiSport Stoktan Dengeleme Aktarımı (${m.multiBalanced}/4)`
         });
@@ -1619,13 +1748,14 @@
         const m = members.find(x => x.id === memberId);
         if (!m || (m.multiStock || 0) <= 0) return alert('Stokta basım bulunmuyor.');
 
-        const qtyStr = prompt(`${m.name} için kaç adet stok basımını DİREKT KASAYA (Adet x 400 TL) aktarmak istiyorsunuz?\nMevcut Stok: ${m.multiStock}`, "1");
+        const dirFee = multiConfig.directFee || 400;
+        const qtyStr = prompt(`${m.name} için kaç adet stok basımını DİREKT KASAYA (Adet x ${dirFee} TL) aktarmak istiyorsunuz?\nMevcut Stok: ${m.multiStock}`, "1");
         if (!qtyStr) return;
         const qty = parseInt(qtyStr);
         if (isNaN(qty) || qty <= 0) return alert('Geçerli bir adet giriniz.');
         if (qty > m.multiStock) return alert(`Stokta sadece ${m.multiStock} adet basım var.`);
 
-        const totalCash = qty * 400;
+        const totalCash = qty * dirFee;
         m.multiStock -= qty;
         extraRevenueLog.push({
             id: uid('ex'),
@@ -1633,7 +1763,7 @@
             memberName: m.name,
             amount: totalCash,
             date: todayStr(),
-            note: `MultiSport Direkt Kart Geliri (${qty} x 400₺)`
+            note: `MultiSport Direkt Kart Geliri (${qty} x ${dirFee}₺)`
         });
 
         saveMembers();
@@ -1699,7 +1829,7 @@
             <div style="display:flex;gap:12px;margin-bottom:18px;">
               <div style="flex:1;">
                 <label style="font-size:12px;color:var(--ink-soft);font-weight:600;display:block;margin-bottom:4px;">Aktif Ders Türü</label>
-                <select id="hist-change-type" onchange="updateMemberType('${m.id}', this.value)" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);">
+                <select id="hist-change-type" ${!isOwner ? 'disabled' : ''} onchange="updateMemberType('${m.id}', this.value)" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);">
                   ${PACKAGES.map(p => `<option value="${p.name}" ${p.name === m.type ? 'selected' : ''}>${p.name}</option>`).join('')}
                 </select>
               </div>
@@ -1708,10 +1838,11 @@
                 <span style="font-size:22px;font-weight:700;color:var(--sage-dark);">${m.remaining}</span>
               </div>
             </div>
+            ${isOwner ? `
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:16px 0 8px;">Kayıt / Yenileme Geçmişi</h4>
             <div style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:0 12px;margin-bottom:18px;">
               ${paymentsHtml || '<div style="padding:10px;text-align:center;color:var(--ink-soft);">Kayıt bulunamadı.</div>'}
-            </div>
+            </div>` : ''}
             <div style="display:flex;gap:10px;">
               <div style="flex:1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center;">
                 <span style="font-size:11px;color:var(--ink-soft);display:block;">TOPLAM ALINAN SEANS</span>
@@ -2126,6 +2257,7 @@
         renderPastSplitView();
     };
 
+    /* DEMO PROGRAMI & GÜN SIFIRLAMA BUTONLARI */
     function renderDemoGrid() {
         const times = getAllTimeSlots();
         const table = document.getElementById('demoTable');
@@ -2165,10 +2297,35 @@
             });
             tbody += `</tr>`;
         });
+
+        // Tablo Altına Gün Sıfırlama Butonları Satırı
+        let tfoot = `<tfoot><tr><td style="padding:8px 12px;font-size:12px;font-weight:700;color:var(--ink-soft);background:var(--bg);">Sıfırla:</td>`;
+        DAY_ORDER.forEach(day => {
+            tfoot += `<td style="padding:6px;text-align:center;">
+                        <button class="btn-clear-day" onclick="clearDemoDay('${day}')">🗑️ ${day.slice(0,3)} Sıfırla</button>
+                      </td>`;
+        });
+        tfoot += `</tr></tfoot>`;
+
         tbody += '</tbody>';
-        table.innerHTML = thead + tbody;
+        table.innerHTML = thead + tbody + tfoot;
         renderMobileDemoView(times);
     }
+
+    window.clearDemoDay = function(dayName) {
+        if (!confirm(`${dayName} gününe ait tüm demo seans kayıtlarını silmek istediğinize emin misiniz?`)) return;
+        demos = demos.filter(d => {
+            const dayOfDemo = JS_DOW[new Date(d.date + 'T00:00:00').getDay()];
+            return dayOfDemo !== dayName;
+        });
+        saveDemos();
+        renderDemoGrid();
+        alert(`${dayName} günü demoları başarıyla temizlendi.`);
+    };
+
+    window.clearSelectedMobileDemoDay = function() {
+        clearDemoDay(selectedMobileDemoDay);
+    };
 
     function renderMobileDemoView(times) {
         const daySelector = document.getElementById('mobileDemoDaySelector');
@@ -2179,6 +2336,12 @@
                 ${shortDays[d] || d}
             </button>
         `).join('');
+
+        const mobClearBtn = document.getElementById('mobileClearDemoDayBtn');
+        if (mobClearBtn) {
+            mobClearBtn.style.display = isMobileView ? 'inline-block' : 'none';
+            mobClearBtn.textContent = `🗑️ ${selectedMobileDemoDay} Sıfırla`;
+        }
 
         const timeline = document.getElementById('mobileDemoTimeline');
         let html = '';
@@ -2481,6 +2644,7 @@
 
     /* ÜYE KAYDI VE PANEL İŞLEMLERİ */
     function openFreshMemberPanel() {
+        if (role !== 'sahibi') return;
         editingId = null;
         document.getElementById('panelTitle').textContent = 'Yeni Üye Ekle';
         document.getElementById('f-type').innerHTML = PACKAGES.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
@@ -2505,7 +2669,6 @@
     });
 
     document.getElementById('openAddBtn').addEventListener('click', openFreshMemberPanel);
-    document.getElementById('hocaDirectAddBtn').addEventListener('click', openFreshMemberPanel);
 
     function addSlotRow(slot) {
         slot = slot || { day: 'Pazartesi', time: '10:00', instructorId: instructors[0]?.id };
@@ -2584,6 +2747,7 @@
     });
 
     window.openEdit = function(id) {
+        if (role !== 'sahibi') return;
         const m = members.find(x => x.id === id);
         if (!m) return;
         editingId = id;
@@ -2594,13 +2758,9 @@
         document.getElementById('f-remaining').value = m.remaining;
         document.getElementById('f-start').value = m.start || '';
         
-        if (role === 'sahibi') {
-            document.getElementById('f-fee-wrap').style.display = 'block';
-            const lastP = (m.payments || []).slice().reverse()[0];
-            document.getElementById('f-fee').value = lastP ? lastP.amount : (PRICE_MAP[m.type] || '');
-        } else {
-            document.getElementById('f-fee-wrap').style.display = 'none';
-        }
+        document.getElementById('f-fee-wrap').style.display = 'block';
+        const lastP = (m.payments || []).slice().reverse()[0];
+        document.getElementById('f-fee').value = lastP ? lastP.amount : (PRICE_MAP[m.type] || '');
 
         document.getElementById('f-schedule-list').innerHTML = '';
         (m.schedule || []).forEach(s => addSlotRow(s));
@@ -2608,6 +2768,7 @@
     };
 
     window.openPayment = function(id) {
+        if (role !== 'sahibi') return;
         paymentForId = id;
         const m = members.find(x => x.id === id);
         document.getElementById('paymentForName').textContent = m ? m.name : '';
