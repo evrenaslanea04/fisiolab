@@ -799,7 +799,7 @@
             </div>
         </div>
 
-        <!-- STOK MULTİNET SEKME (Sadece Yönetici) -->
+        <!-- STOK MULTİSPORT SEKME (Sadece Yönetici) -->
         <div class="view" id="view-multiStock">
             <div class="controls" style="justify-content:space-between;">
                 <p style="font-size:13.5px;color:var(--ink-soft);margin:0;" id="multiStockHeaderDesc">
@@ -1459,7 +1459,7 @@
                 { id: 'members', label: 'Üyeler' },
                 { id: 'schedule', label: 'Ders Programı' },
                 { id: 'demoSchedule', label: 'Demo Programı' },
-                { id: 'multiStock', label: '💳 STOK MULTİNET' },
+                { id: 'multiStock', label: '💳 STOK MULTİSPORT' },
                 { id: 'pastWeeks', label: 'Geçmiş Haftalar' },
                 { id: 'finance', label: 'Gelir/Gider' },
                 { id: 'reminders', label: 'Hatırlatmalar' },
@@ -1641,7 +1641,7 @@
         if (currentTab === 'multiStock') renderMultiStock();
     };
 
-    /* STOK MULTİNET SEKMESİ */
+    /* STOK MULTİSPORT SEKMESİ */
     function renderMultiStock() {
         if (role !== 'sahibi') return;
         const wrap = document.getElementById('multiStockListArea');
@@ -2671,9 +2671,10 @@
     document.getElementById('openAddBtn').addEventListener('click', openFreshMemberPanel);
 
     function addSlotRow(slot) {
-        slot = slot || { day: 'Pazartesi', time: '10:00', instructorId: instructors[0]?.id };
+        slot = slot || { id: uid('s'), day: 'Pazartesi', time: '10:00', instructorId: instructors[0]?.id, attendance: {} };
         const wrap = document.createElement('div');
         wrap.className = 'schedule-slot';
+        wrap.dataset.slotId = slot.id || uid('s');
         wrap.innerHTML = `
             <div class="schedule-slot-row">
               <select class="slot-day">${DAY_ORDER.map(d => `<option ${d === slot.day ? 'selected' : ''}>${d}</option>`).join('')}</select>
@@ -2705,19 +2706,35 @@
         const phone = document.getElementById('f-phone').value.trim();
         const type = document.getElementById('f-type').value;
         const totalSessions = getPackageTotalSessions(type);
-        const remaining = parseInt(document.getElementById('f-remaining').value) || totalSessions;
+        const remVal = parseInt(document.getElementById('f-remaining').value);
+        const remaining = isNaN(remVal) ? totalSessions : remVal;
         const start = document.getElementById('f-start').value;
         const fee = parseFloat(document.getElementById('f-fee').value) || 0;
 
         if (!name) return alert('İsim girin.');
 
-        const slots = Array.from(document.querySelectorAll('#f-schedule-list .schedule-slot')).map(wrap => ({
-            id: uid('s'),
-            day: wrap.querySelector('.slot-day').value,
-            time: wrap.querySelector('.slot-time').value || '10:00',
-            instructorId: wrap.querySelector('.slot-instructor').value,
-            attendance: {}
-        }));
+        const existingMember = editingId ? members.find(x => x.id === editingId) : null;
+        const existingSlotsMap = {};
+        if (existingMember && existingMember.schedule) {
+            existingMember.schedule.forEach(s => {
+                if (s.id) existingSlotsMap[s.id] = s;
+            });
+        }
+
+        const slots = Array.from(document.querySelectorAll('#f-schedule-list .schedule-slot')).map(wrap => {
+            const sId = wrap.dataset.slotId;
+            const oldSlot = sId && existingSlotsMap[sId] ? existingSlotsMap[sId] : null;
+
+            return {
+                id: sId || uid('s'),
+                day: wrap.querySelector('.slot-day').value,
+                time: wrap.querySelector('.slot-time').value || '10:00',
+                instructorId: wrap.querySelector('.slot-instructor').value,
+                attendance: oldSlot && oldSlot.attendance ? { ...oldSlot.attendance } : {},
+                override: oldSlot && oldSlot.override ? { ...oldSlot.override } : undefined,
+                postponedOccDate: oldSlot ? oldSlot.postponedOccDate : undefined
+            };
+        });
 
         for (let slot of slots) {
             if (!checkCapacityLimit(slot.day, slot.time, slot.instructorId, type, editingId)) {
@@ -2728,8 +2745,18 @@
 
         if (editingId) {
             const m = members.find(x => x.id === editingId);
-            if (m) Object.assign(m, { name, phone, type, remaining, totalSessions, start, schedule: slots });
+            if (m) {
+                slots.forEach(s => {
+                    if (!s.override) delete s.override;
+                    if (!s.postponedOccDate) delete s.postponedOccDate;
+                });
+                Object.assign(m, { name, phone, type, remaining, totalSessions, start, schedule: slots });
+            }
         } else {
+            slots.forEach(s => {
+                if (!s.override) delete s.override;
+                if (!s.postponedOccDate) delete s.postponedOccDate;
+            });
             members.push({
                 id: uid('m'),
                 name, phone, type, remaining, totalSessions, start,
