@@ -1151,15 +1151,44 @@
         return supabaseClient;
     }
 
+    let cloudReady = false;
+
+    function showSyncWarning(msg) {
+        let b = document.getElementById('syncBanner');
+        if (!msg) { if (b) b.remove(); return; }
+        if (!b) {
+            b = document.createElement('div');
+            b.id = 'syncBanner';
+            b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:10000;background:#AE4F3D;color:#fff;padding:10px 14px;border-radius:10px;font-size:13px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.2);';
+            document.body.appendChild(b);
+        }
+        b.textContent = msg;
+    }
+
     async function cloudSet(key, value) {
+        try { localStorage.setItem('app_' + key, JSON.stringify(value)); } catch (e) { console.warn('Yerel yedek yazılamadı:', e); }
+
+        const sb = getSupabase();
+        if (!sb) return;
+
+        // İlk yükleme başarısız olduysa buluttaki veriyi eksik/boş veriyle ezmemek için buluta yazma
+        if (!cloudReady) {
+            console.warn('Bulut hazır değil, kayıt yalnızca yerelde tutuldu:', key);
+            showSyncWarning('⚠️ Sunucu bağlantısı yok. Değişiklikler buluta KAYDEDİLMİYOR. Bağlantıyı kontrol edip sayfayı yenileyin.');
+            return;
+        }
+
         try {
-            localStorage.setItem('app_' + key, JSON.stringify(value));
-            const sb = getSupabase();
-            if (sb) {
-                await sb.from('studio_data').upsert({ key: key, value: value, updated_at: new Date().toISOString() });
+            const { error } = await sb.from('studio_data').upsert({ key: key, value: value, updated_at: new Date().toISOString() });
+            if (error) {
+                console.error('Buluta kaydedilemedi:', key, error);
+                showSyncWarning('⚠️ Son değişiklik buluta kaydedilemedi: ' + (error.message || 'bilinmeyen hata'));
+            } else {
+                showSyncWarning(null);
             }
         } catch (e) {
             console.error('Buluta kaydedilemedi:', e);
+            showSyncWarning('⚠️ Son değişiklik buluta kaydedilemedi. İnternet bağlantınızı kontrol edin.');
         }
     }
 
@@ -1186,7 +1215,10 @@
         if (sb) {
             try {
                 const { data, error } = await sb.from('studio_data').select('*');
-                if (!error && data && data.length > 0) {
+                if (error) throw error;
+                cloudReady = true;
+                showSyncWarning(null);
+                if (data && data.length > 0) {
                     const dbMap = {};
                     data.forEach(row => { dbMap[row.key] = row.value; });
 
@@ -1203,10 +1235,14 @@
                 }
             } catch (e) {
                 console.warn('Supabase yükleme uyarısı:', e);
+                cloudReady = false;
                 loadFromLocalBackup();
+                showSyncWarning('⚠️ Sunucuya bağlanılamadı, yerel yedek gösteriliyor. Değişiklikler buluta KAYDEDİLMEZ.');
             }
         } else {
+            cloudReady = false;
             loadFromLocalBackup();
+            showSyncWarning('⚠️ Sunucu kütüphanesi yüklenemedi, yerel yedek gösteriliyor. Değişiklikler buluta KAYDEDİLMEZ.');
         }
 
         if (!instructors || !instructors.length) {
@@ -1505,6 +1541,13 @@
         return baseAmount > 0 ? (baseAmount / total) : 0;
     }
 
+    function findLastLessonLogIdx(memberId, date) {
+        for (let i = lessonLog.length - 1; i >= 0; i--) {
+            if (lessonLog[i].memberId === memberId && lessonLog[i].date === date) return i;
+        }
+        return -1;
+    }
+
     function logLesson(m, instructorId, dateStr) {
         if (!instructorId) return;
         lessonLog.push({
@@ -1512,6 +1555,7 @@
             memberId: m.id,
             memberName: m.name,
             instructorId,
+            instructorName: getInstructorName(instructorId),
             date: dateStr,
             amount: lessonPriceOf(m),
             type: m.type
@@ -1688,12 +1732,12 @@
                     <button class="btn-step" onclick="changeMultiStock('${m.id}', 1)" title="Stok Artır">+</button>
                   </div>
                   <div style="text-align:center;">
-                    <button class="btn-ghost" onclick="transferStockToBalance('${m.id}')" style="background:#FAF5EE;border-color:var(--clay);color:var(--clay);font-weight:600;font-size:12px;padding:7px 10px;width:100%;" ${stock <= 0 ? 'disabled style="opacity:0.4;"' : ''}>
+                    <button class="btn-ghost" onclick="transferStockToBalance('${m.id}')" style="background:#FAF5EE;border-color:var(--clay);color:var(--clay);font-weight:600;font-size:12px;padding:7px 10px;width:100%;${stock <= 0 ? 'opacity:0.4;' : ''}" ${stock <= 0 ? 'disabled' : ''}>
                       🔄 1 Adet Dengele (+${balFee}₺)
                     </button>
                   </div>
                   <div style="display:flex;justify-content:flex-end;gap:5px;">
-                    <button class="btn-add" onclick="transferStockDirectToCash('${m.id}')" style="background:var(--sage-dark);font-size:12px;padding:7px 12px;" ${stock <= 0 ? 'disabled style="opacity:0.4;"' : ''}>
+                    <button class="btn-add" onclick="transferStockDirectToCash('${m.id}')" style="background:var(--sage-dark);font-size:12px;padding:7px 12px;${stock <= 0 ? 'opacity:0.4;' : ''}" ${stock <= 0 ? 'disabled' : ''}>
                       💰 Kasaya Çek (${dirFee}₺)
                     </button>
                   </div>
@@ -2069,13 +2113,18 @@
         const slot = (m.schedule || []).find(s => s.id === slotId);
         if (!slot) return;
         if (!slot.attendance) slot.attendance = {};
+        if (slot.attendance[occDate]) return; // aynı ders için çifte yoklamayı engelle
 
         if (m.frozenUntil) delete m.frozenUntil;
+
+        const lessonInstId = slot.override?.active ? (slot.override.instructorId || slot.instructorId) : slot.instructorId;
+        let deducted = false;
 
         if (isCompleted) {
             if (m.remaining > 0) {
                 m.remaining -= 1;
-                logLesson(m, slot.override?.active ? (slot.override.instructorId || slot.instructorId) : slot.instructorId, occDate);
+                deducted = true;
+                logLesson(m, lessonInstId, occDate);
             }
             slot.attendance[occDate] = 'completed';
         } else {
@@ -2086,17 +2135,37 @@
             } else {
                 if (m.remaining > 0) {
                     m.remaining -= 1;
-                    logLesson(m, slot.override?.active ? (slot.override.instructorId || slot.instructorId) : slot.instructorId, occDate);
+                    deducted = true;
+                    logLesson(m, lessonInstId, occDate);
                 }
                 alert(`${m.name} 2 gelmeme hakkını aştı! Seansı 1 adet düşüldü.`);
             }
         }
+
+        // Seans gerçekten düşüldü mü? (geri alırken fazladan seans eklememek için)
+        if (!slot.deducted) slot.deducted = {};
+        slot.deducted[occDate] = deducted;
 
         saveMembers();
         renderScheduleGrid();
         render();
         if (currentTab === 'multiStock') renderMultiStock();
     };
+
+    // Arşivlenen haftalık tablodaki canlı butonları ve veri bağlarını temizler
+    function sanitizeArchivedTable(html) {
+        const tmp = document.createElement('table');
+        tmp.innerHTML = html || '';
+        tmp.querySelectorAll('.attendance-actions').forEach(n => n.remove());
+        tmp.querySelectorAll('[onclick]').forEach(n => n.removeAttribute('onclick'));
+        tmp.querySelectorAll('.cell-entry').forEach(n => {
+            n.removeAttribute('data-member-id');
+            n.removeAttribute('data-slot-id');
+            n.removeAttribute('data-occ-date');
+            n.removeAttribute('data-virtual');
+        });
+        return tmp.innerHTML;
+    }
 
     document.getElementById('endWeekBtn').addEventListener('click', () => {
         const now = new Date();
@@ -2119,13 +2188,14 @@
             id: uid('pw'),
             name: weekName,
             date: todayStr(),
-            tableHtml: document.getElementById('schedTable').innerHTML,
+            tableHtml: sanitizeArchivedTable(document.getElementById('schedTable').innerHTML),
             packageCounts: packageTypeCounts
         });
 
         members.forEach(m => {
             (m.schedule || []).forEach(slot => {
                 slot.attendance = {};
+                slot.deducted = {};
                 if (slot.override) delete slot.override;
                 if (slot.postponedOccDate) delete slot.postponedOccDate;
             });
@@ -2209,7 +2279,7 @@
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:0 0 10px;">Tamamlanan Seans Dağılımı</h4>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">${countsHtml || '<div style="color:var(--ink-soft);padding:6px;">Bu hafta tamamlanan seans kaydı yok.</div>'}</div>
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:0 0 10px;">Haftalık Tablo Görüntüsü</h4>
-            <div class="sched-table-wrap" style="max-height:380px;overflow-y:auto;"><table class="sched-table">${pw.tableHtml}</table></div>`;
+            <div class="sched-table-wrap" style="max-height:380px;overflow-y:auto;"><table class="sched-table">${sanitizeArchivedTable(pw.tableHtml)}</table></div>`;
         openPanel('weekDetailPanel');
     };
 
@@ -2418,33 +2488,51 @@
     });
 
     /* GELİR / GİDER HESAPLAMALARI */
-    function renderFinance() {
-        if (role !== 'sahibi') return;
-        const month = document.getElementById('finance-month').value || todayStr().slice(0, 7);
+    function computeFinance(month) {
         let lessonRev = 0, commTotal = 0;
-        let perInst = {};
+        const perInst = {};
 
         lessonLog.forEach(l => {
             if ((l.date || '').slice(0, 7) !== month) return;
-            lessonRev += l.amount;
-            if (!perInst[l.instructorId]) perInst[l.instructorId] = { rev: 0, comm: 0, count: 0 };
-            perInst[l.instructorId].rev += l.amount;
+            const amt = Number(l.amount) || 0;
+            lessonRev += amt;
+            if (!perInst[l.instructorId]) perInst[l.instructorId] = { rev: 0, comm: 0, count: 0, name: l.instructorName || null };
+            perInst[l.instructorId].rev += amt;
             perInst[l.instructorId].count += 1;
             const inst = instructors.find(i => i.id === l.instructorId);
-            const comm = l.amount * ((inst?.primPercent ?? 30) / 100);
+            const comm = amt * ((inst?.primPercent ?? 30) / 100);
             perInst[l.instructorId].comm += comm;
             commTotal += comm;
         });
 
         let multiRevenueMonth = 0;
         extraRevenueLog.forEach(ex => {
-            if ((ex.date || '').slice(0, 7) === month) multiRevenueMonth += Number(ex.amount);
+            if ((ex.date || '').slice(0, 7) === month) multiRevenueMonth += Number(ex.amount) || 0;
         });
 
-        const totalKasa = (lessonRev + multiRevenueMonth) - commTotal;
+        const rows = instructors.map(inst => {
+            const d = perInst[inst.id] || { rev: 0, comm: 0, count: 0 };
+            return { id: inst.id, name: inst.name, prim: inst.primPercent ?? 30, rev: d.rev, count: d.count, comm: d.comm };
+        });
+        // Silinmiş hocaların dersleri de satır olarak görünsün ki toplamlar tutsun
+        Object.keys(perInst).forEach(id => {
+            if (instructors.some(i => i.id === id)) return;
+            const d = perInst[id];
+            rows.push({ id, name: (d.name || 'Silinmiş Hoca') + ' (silinmiş)', prim: 30, rev: d.rev, count: d.count, comm: d.comm });
+        });
+
+        return { lessonRev, commTotal, multiRevenueMonth, rows };
+    }
+
+    function renderFinance() {
+        if (role !== 'sahibi') return;
+        const month = document.getElementById('finance-month').value || todayStr().slice(0, 7);
+        const f = computeFinance(month);
+
+        const totalKasa = (f.lessonRev + f.multiRevenueMonth) - f.commTotal;
         document.getElementById('financeStats').innerHTML = `
-            <div class="stat"><div class="num clay">${(lessonRev + multiRevenueMonth).toLocaleString('tr-TR')}₺</div><div class="label">Toplam Gelir (Ciro + Multi)</div></div>
-            <div class="stat"><div class="num alert">${commTotal.toLocaleString('tr-TR')}₺</div><div class="label">Maaş Hakedişleri</div></div>
+            <div class="stat"><div class="num clay">${(f.lessonRev + f.multiRevenueMonth).toLocaleString('tr-TR')}₺</div><div class="label">Toplam Gelir (Ciro + Multi)</div></div>
+            <div class="stat"><div class="num alert">${f.commTotal.toLocaleString('tr-TR')}₺</div><div class="label">Maaş Hakedişleri</div></div>
             <div class="stat"><div class="num">${totalKasa.toLocaleString('tr-TR')}₺</div><div class="label">Kalan Net Kasa</div></div>`;
 
         let html = `
@@ -2456,14 +2544,13 @@
                 <div>Maaş Hakedişi (₺)</div>
               </div>`;
 
-        instructors.forEach(inst => {
-            const d = perInst[inst.id] || { rev: 0, comm: 0, count: 0 };
+        f.rows.forEach(r => {
             html += `
                 <div class="row" style="grid-template-columns:1.5fr 1fr 1fr 1fr;">
-                  <div class="m-name">${escapeHtml(inst.name)} (%${inst.primPercent ?? 30})</div>
-                  <div class="sessions">${d.rev.toLocaleString('tr-TR')}₺</div>
-                  <div class="sessions">${d.count} Ders</div>
-                  <div class="sessions" style="color:var(--alert);">${d.comm.toLocaleString('tr-TR')}₺</div>
+                  <div class="m-name">${escapeHtml(r.name)} (%${r.prim})</div>
+                  <div class="sessions">${r.rev.toLocaleString('tr-TR')}₺</div>
+                  <div class="sessions">${r.count} Ders</div>
+                  <div class="sessions" style="color:var(--alert);">${r.comm.toLocaleString('tr-TR')}₺</div>
                 </div>`;
         });
         html += '</div>';
@@ -2478,38 +2565,16 @@
 
         if (!confirm(`"${monthName}" dönemini sıfırlayıp Geçmiş Aylar tablosuna kaydetmek istediğinize emin misiniz?`)) return;
 
-        let lessonRev = 0, commTotal = 0;
-        let perInst = {};
-
-        lessonLog.forEach(l => {
-            if ((l.date || '').slice(0, 7) !== monthInput) return;
-            lessonRev += l.amount;
-            if (!perInst[l.instructorId]) perInst[l.instructorId] = { rev: 0, comm: 0, count: 0 };
-            perInst[l.instructorId].rev += l.amount;
-            perInst[l.instructorId].count += 1;
-            const inst = instructors.find(i => i.id === l.instructorId);
-            const comm = l.amount * ((inst?.primPercent ?? 30) / 100);
-            perInst[l.instructorId].comm += comm;
-            commTotal += comm;
-        });
-
-        let multiRevenueMonth = 0;
-        extraRevenueLog.forEach(ex => {
-            if ((ex.date || '').slice(0, 7) === monthInput) multiRevenueMonth += Number(ex.amount);
-        });
-
-        const instructorDetails = instructors.map(inst => {
-            const d = perInst[inst.id] || { rev: 0, comm: 0, count: 0 };
-            return { name: inst.name, prim: inst.primPercent ?? 30, rev: d.rev, count: d.count, comm: d.comm };
-        });
+        const f = computeFinance(monthInput);
+        const instructorDetails = f.rows.map(r => ({ name: r.name, prim: r.prim, rev: r.rev, count: r.count, comm: r.comm }));
 
         pastMonths.push({
             id: uid('pm'),
             monthKey: monthInput,
             monthName: monthName,
             closeDate: todayStr(),
-            totalRev: lessonRev + multiRevenueMonth,
-            totalComm: commTotal,
+            totalRev: f.lessonRev + f.multiRevenueMonth,
+            totalComm: f.commTotal,
             instructorDetails: instructorDetails
         });
 
@@ -2556,6 +2621,11 @@
     };
 
     window.removeInstructor = function(id) {
+        const usedSlots = members.reduce((n, m) => n + (m.schedule || []).filter(s => s.instructorId === id || (s.override && s.override.instructorId === id)).length, 0);
+        if (usedSlots > 0) {
+            alert(`Bu hocaya atanmış ${usedSlots} haftalık ders var. Silmeden önce bu dersleri başka bir hocaya taşıyın (Üye > Düzenle).`);
+            return;
+        }
         if (!confirm('Hocayı silmek istiyor musunuz?')) return;
         instructors = instructors.filter(i => i.id !== id);
         saveInstructors();
@@ -2689,16 +2759,41 @@
 
     document.getElementById('addScheduleSlotBtn').addEventListener('click', () => addSlotRow());
 
-    function checkCapacityLimit(day, time, instructorId, targetType, excludeMemberId = null) {
-        const targetCap = CAPACITY[targetType] || 1;
-        let existingMembers = [];
+    // Slot kapasitesi = slottaki herkesin (ve eklenecek üyenin) paket kapasitelerinin en küçüğü.
+    // Demo seansları ve tek seferlik taşınan dersler de doluluğa sayılır.
+    // occDate verilirse (tek seferlik taşıma) o tarihteki durum kontrol edilir.
+    function checkCapacityLimit(day, time, instructorId, targetType, excludeMemberId = null, occDate = null) {
+        const now = new Date();
+        const today = todayStr();
+        const caps = [CAPACITY[targetType] || 1];
+        let count = 0;
+
         members.forEach(m => {
             if (excludeMemberId && m.id === excludeMemberId) return;
+            const mCap = CAPACITY[m.type] || 1;
             (m.schedule || []).forEach(s => {
-                if (s.day === day && s.time === time && s.instructorId === instructorId) existingMembers.push(m);
+                const slotOcc = fmtDate(occDateInWindow(s.day, now));
+                const moved = !!(s.override && s.override.active && s.override.forOccDate === slotOcc);
+
+                if (s.day === day && s.time === time && s.instructorId === instructorId) {
+                    const awayThisWeek = occDate && (moved || s.postponedOccDate === slotOcc);
+                    if (!awayThisWeek) { count++; caps.push(mCap); }
+                }
+
+                if (occDate && moved && s.override.day === day && s.override.time === time &&
+                    (s.override.instructorId || s.instructorId) === instructorId) {
+                    count++; caps.push(mCap);
+                }
             });
         });
-        return existingMembers.length < targetCap;
+
+        demos.forEach(d => {
+            if (d.time !== time || d.instructorId !== instructorId) return;
+            if (JS_DOW[new Date(d.date + 'T00:00:00').getDay()] !== day) return;
+            if (occDate ? d.date === occDate : d.date >= today) count++;
+        });
+
+        return count < Math.min(...caps);
     }
 
     document.getElementById('saveBtn').addEventListener('click', () => {
@@ -2731,6 +2826,7 @@
                 time: wrap.querySelector('.slot-time').value || '10:00',
                 instructorId: wrap.querySelector('.slot-instructor').value,
                 attendance: oldSlot && oldSlot.attendance ? { ...oldSlot.attendance } : {},
+                deducted: oldSlot && oldSlot.deducted ? { ...oldSlot.deducted } : undefined,
                 override: oldSlot && oldSlot.override ? { ...oldSlot.override } : undefined,
                 postponedOccDate: oldSlot ? oldSlot.postponedOccDate : undefined
             };
@@ -2738,7 +2834,7 @@
 
         for (let slot of slots) {
             if (!checkCapacityLimit(slot.day, slot.time, slot.instructorId, type, editingId)) {
-                alert(`Ders Programı Dolu!\n${getInstructorName(slot.instructorId)} hocanın ${slot.day} saat ${slot.time} seansında kontenjan doludur.`);
+                alert(`Ders Programı Dolu!\n${getInstructorName(slot.instructorId)} hocanın ${slot.day} saat ${slot.time} seansında kontenjan dolu veya farklı paket türüyle uyumsuz (demo seansları dahil).`);
                 return;
             }
         }
@@ -2751,6 +2847,18 @@
                     if (!s.postponedOccDate) delete s.postponedOccDate;
                 });
                 Object.assign(m, { name, phone, type, remaining, totalSessions, start, schedule: slots });
+
+                // Ücret alanı: son ödeme kaydını güncelle (ders başı hesap buna göre yapılıyor)
+                if (fee > 0) {
+                    if (!m.payments) m.payments = [];
+                    const lastPay = m.payments[m.payments.length - 1];
+                    if (lastPay) {
+                        lastPay.amount = fee;
+                        lastPay.type = type;
+                    } else if (fee !== (PRICE_MAP[type] || 0)) {
+                        m.payments.push({ amount: fee, date: start || todayStr(), note: 'Kayıt', type: type });
+                    }
+                }
             }
         } else {
             slots.forEach(s => {
@@ -2852,6 +2960,7 @@
         }
 
         const m = members.find(x => x.id === memberId);
+        if (!m) return;
         const slot = (m.schedule || []).find(s => s.id === slotId);
         if (!slot) return;
 
@@ -2883,29 +2992,31 @@
     document.getElementById('eaUndoBtn').addEventListener('click', () => {
         if (!eaContext) return;
         const m = members.find(x => x.id === eaContext.memberId);
+        if (!m) return;
         const slot = (m.schedule || []).find(s => s.id === eaContext.slotId);
-        if (!m || !slot) return;
+        if (!slot) return;
 
-        const currentAtt = (slot.attendance || {})[eaContext.occDate];
+        const date = eaContext.occDate;
+        const currentAtt = (slot.attendance || {})[date];
         if (!currentAtt) return alert('Bu ders için henüz yapılmış bir yoklama yok.');
 
         if (confirm(`${m.name} için yapılan yoklamayı geri almak istiyor musunuz?`)) {
-            if (currentAtt === 'completed') {
+            const flag = slot.deducted ? slot.deducted[date] : undefined;
+            const logIdx = findLastLessonLogIdx(m.id, date);
+            // Yeni kayıtlarda bayrak kesin bilgi verir; eski kayıtlarda ders logunun varlığına bakılır
+            const wasDeducted = (typeof flag === 'boolean') ? flag : (logIdx !== -1);
+
+            if (wasDeducted) {
                 m.remaining += 1;
-                const idx = lessonLog.findLastIndex(l => l.memberId === m.id && l.date === eaContext.occDate);
-                if (idx !== -1) lessonLog.splice(idx, 1);
-                saveLessonLog();
-            } else if (currentAtt === 'missed') {
-                if (m.missedCount > 2) {
-                    m.remaining += 1;
-                    const idx = lessonLog.findLastIndex(l => l.memberId === m.id && l.date === eaContext.occDate);
-                    if (idx !== -1) lessonLog.splice(idx, 1);
+                if (logIdx !== -1) {
+                    lessonLog.splice(logIdx, 1);
                     saveLessonLog();
                 }
-                m.missedCount = Math.max(0, m.missedCount - 1);
             }
+            if (currentAtt === 'missed') m.missedCount = Math.max(0, (m.missedCount || 0) - 1);
 
-            delete slot.attendance[eaContext.occDate];
+            delete slot.attendance[date];
+            if (slot.deducted) delete slot.deducted[date];
             saveMembers();
             closeAllPanels();
             renderScheduleGrid();
@@ -2950,8 +3061,8 @@
         const newTime = document.getElementById('ea-new-time').value || '10:00';
         const newInst = document.getElementById('ea-new-instructor').value;
 
-        if (!checkCapacityLimit(newDay, newTime, newInst, m.type, m.id)) {
-            alert(`Ders Programı Dolu!\nSeçtiğiniz günde bu hocanın kontenjanı doludur, ders taşınamaz.`);
+        if (!checkCapacityLimit(newDay, newTime, newInst, m.type, m.id, fmtDate(occDateInWindow(newDay, new Date())))) {
+            alert(`Ders Programı Dolu!\nSeçtiğiniz gün/saatte bu hocanın kontenjanı dolu (demo ve taşınan dersler dahil) veya paket türü uyumsuz, ders taşınamaz.`);
             return;
         }
 
@@ -2985,6 +3096,7 @@
     document.getElementById('cancelBtn').addEventListener('click', closeAllPanels);
 
     // --- UYGULAMA BAŞLATICI ---
+    window.addEventListener('online', () => { if (!cloudReady) loadAll(); });
     initDeviceDetection();
     checkAuth();
     loadAll().then(() => {
