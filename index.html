@@ -1255,6 +1255,7 @@
             instructors.forEach(inst => { if (!inst.pass) inst.pass = '1234'; });
         }
 
+        let slotIdsMigrated = false;
         members.forEach(m => {
             if (!m.schedule) m.schedule = [];
             if (!m.payments) m.payments = [];
@@ -1262,8 +1263,12 @@
             if (!m.totalSessions) m.totalSessions = getPackageTotalSessions(m.type);
             if (m.multiStock == null) m.multiStock = 0;
             if (m.multiBalanced == null) m.multiBalanced = 0;
-            m.schedule.forEach(s => { if (!s.attendance) s.attendance = {}; });
+            m.schedule.forEach(s => {
+                if (!s.attendance) s.attendance = {};
+                if (!s.id) { s.id = uid('s'); slotIdsMigrated = true; }
+            });
         });
+        if (slotIdsMigrated) saveMembers();
 
         renderCurrentView();
     }
@@ -1474,6 +1479,8 @@
         
         // Eğitmende Üye Ekle butonunu gizle (Sadece yöneticide açık)
         document.getElementById('openAddBtn').style.display = isOwner ? 'block' : 'none';
+        const endWeekWrap = document.getElementById('endWeekBtn')?.parentElement;
+        if (endWeekWrap) endWeekWrap.style.display = isOwner ? 'flex' : 'none';
 
         document.getElementById('f-fee-wrap').style.display = isOwner ? 'block' : 'none';
         document.getElementById('p-fee-wrap').style.display = isOwner ? 'block' : 'none';
@@ -2168,9 +2175,15 @@
     }
 
     document.getElementById('endWeekBtn').addEventListener('click', () => {
+        if (role !== 'sahibi') return;
         const now = new Date();
         const weekName = `${now.getDate()} ${now.toLocaleString('tr-TR', { month: 'long' })} ${now.getFullYear()} Haftası`;
-        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?`)) return;
+        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nDikkat: Bu işlem tüm tik/çarpıları sıfırlar.`)) return;
+        const typed = prompt('Onaylamak için BİTİR yazın (iptal için boş bırakın):');
+        if (!typed || typed.trim().toLocaleUpperCase('tr-TR') !== 'BİTİR') {
+            alert('Hafta kapatılmadı. Hiçbir şey değiştirilmedi.');
+            return;
+        }
 
         let packageTypeCounts = {};
         PACKAGES.forEach(p => { packageTypeCounts[p.name] = 0; });
@@ -2188,6 +2201,8 @@
             id: uid('pw'),
             name: weekName,
             date: todayStr(),
+            closedAt: new Date().toISOString(),
+            closedByRole: role,
             tableHtml: sanitizeArchivedTable(document.getElementById('schedTable').innerHTML),
             packageCounts: packageTypeCounts
         });
@@ -2818,7 +2833,13 @@
 
         const slots = Array.from(document.querySelectorAll('#f-schedule-list .schedule-slot')).map(wrap => {
             const sId = wrap.dataset.slotId;
-            const oldSlot = sId && existingSlotsMap[sId] ? existingSlotsMap[sId] : null;
+            let oldSlot = sId && existingSlotsMap[sId] ? existingSlotsMap[sId] : null;
+            if (!oldSlot && existingMember && existingMember.schedule) {
+                const dd = wrap.querySelector('.slot-day').value;
+                const tt = wrap.querySelector('.slot-time').value;
+                const ii = wrap.querySelector('.slot-instructor').value;
+                oldSlot = existingMember.schedule.find(o => o.day === dd && o.time === tt && o.instructorId === ii) || null;
+            }
 
             return {
                 id: sId || uid('s'),
