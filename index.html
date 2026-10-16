@@ -1579,15 +1579,15 @@
     function renderStats() {
         const wrap = document.getElementById('statsRow');
         const total = members.length;
-        const active = members.filter(m => statusOf(m) === 'active').length;
-        const low = members.filter(m => statusOf(m) === 'low').length;
-        const frozen = members.filter(m => m.frozenUntil && todayStr() <= m.frozenUntil).length;
+        const active = members.filter(m => m.remaining > 0).length;
+        const low = members.filter(m => m.remaining > 0 && m.remaining <= 2).length;
+        const finished = members.filter(m => m.remaining <= 0).length;
 
         wrap.innerHTML = `
             <div class="stat"><div class="num">${total}</div><div class="label">Toplam Üye</div></div>
             <div class="stat"><div class="num">${active}</div><div class="label">Aktif Üye</div></div>
             <div class="stat"><div class="num alert">${low}</div><div class="label">Azalan Paket</div></div>
-            <div class="stat"><div class="num alert">${frozen}</div><div class="label">Dondurulan</div></div>`;
+            <div class="stat"><div class="num alert">${finished}</div><div class="label">Biten Paket</div></div>`;
     }
 
     function getMemberScheduleDetail(m) {
@@ -1601,7 +1601,7 @@
         let filtered = members.filter(m => {
             const matchesSearch = !searchTerm || m.name.toLowerCase().includes(searchTerm) || (role === 'sahibi' && (m.phone || '').includes(searchTerm));
             let matchesFilter = true;
-            if (currentFilter === 'active') matchesFilter = statusOf(m) === 'active';
+            if (currentFilter === 'active') matchesFilter = m.remaining > 0;
             else if (currentFilter === 'low') matchesFilter = m.remaining <= 2 && m.remaining > 0;
             else if (currentFilter === 'done') matchesFilter = m.remaining <= 0;
             else if (currentFilter === 'multisport') matchesFilter = m.type === "MultiSport Grup Reformer";
