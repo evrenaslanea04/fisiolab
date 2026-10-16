@@ -1492,8 +1492,8 @@
                 { id: 'reminders', label: 'Hatırlatmalar' }
             ]
             : [
-                { id: 'members', label: 'Üyeler' },
                 { id: 'schedule', label: 'Ders Programı' },
+                { id: 'members', label: 'Üyeler' },
                 { id: 'demoSchedule', label: 'Demo Programı' },
                 { id: 'multiStock', label: '💳 STOK MULTİSPORT' },
                 { id: 'pastWeeks', label: 'Geçmiş Haftalar' },
@@ -1923,7 +1923,7 @@
 
     function getAllTimeSlots() {
         let base = [];
-        for (let h = 9; h <= 22; h++) base.push(String(h).padStart(2, '0') + ':00');
+        for (let h = 9; h <= 23; h++) base.push(String(h).padStart(2, '0') + ':00');
         return base;
     }
 
