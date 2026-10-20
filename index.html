@@ -780,7 +780,6 @@
             <div class="controls">
                 <div id="instructorTabs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
             </div>
-            <div class="week-range" id="weekRangeLabel"></div>
             <div class="mobile-day-selector" id="mobileDaySelector"></div>
             <div class="mobile-schedule-timeline" id="mobileScheduleTimeline"></div>
             <div class="sched-table-wrap">
@@ -789,9 +788,7 @@
             <div style="margin-top:20px;display:flex;justify-content:flex-end;">
                 <button class="btn-add" id="endWeekBtn" style="background:var(--clay);font-size:15px;padding:12px 20px;width:100%;">🏁 Bu Haftayı Bitir ve Kaydet</button>
             </div>
-            <div style="margin-top:10px;display:flex;justify-content:flex-end;">
-                <button class="btn-ghost" id="recoverWeekBtn" style="font-size:12.5px;">🛠️ Yanlışlıkla Kapanan Haftayı Kurtar</button>
-            </div>
+
         </div>
 
         <!-- DEMO/BOŞLUK SEKME -->
@@ -1085,7 +1082,6 @@
     ];
     let demos = [];
     let pastWeeks = [];
-    let weekState = { start: null }; // aktif haftanın pazartesi tarihi (YYYY-MM-DD); yalnızca 'Haftayı Bitir' ile ilerler
     let pastMonths = [];
     let lessonLog = [];
     let extraRevenueLog = [];
@@ -1127,9 +1123,21 @@
         const [y, m, d] = str.split('-').map(Number);
         return new Date(y, m - 1, d);
     }
-    // Aktif haftanın başlangıcı: kullanıcı haftayı kapatana kadar SABİT kalır (gün değişince kaymaz)
+    // Gösterilen hafta = bugünün içinde bulunduğu Pazartesi–Pazar haftası (hafta içinde kaymaz).
+    // weekOverride yalnızca "haftayı kaydet" sırasında, seçilen Pazartesi haftası için geçici kullanılır.
+    let weekOverride = null;
+    // weekAnchor: ekranda gösterilen (henüz kaydedilmemiş) haftanın Pazartesi'si. Sadece "Haftayı Bitir ve Kaydet" ile ilerler;
+    // takvimde hafta değişse bile (ör. Pazar'ı unutup Pazartesi kaydederken) eski hafta olduğu gibi ekranda kalır.
+    let weekAnchor = null;
     function getWeekStartDate() {
-        return (weekState && weekState.start) ? parseDateStr(weekState.start) : mondayOf(new Date());
+        if (weekOverride) return parseDateStr(weekOverride);
+        return (weekAnchor && weekAnchor.start) ? parseDateStr(weekAnchor.start) : mondayOf(new Date());
+    }
+    function ensureWeekAnchor() {
+        if (!weekAnchor || !weekAnchor.start) {
+            weekAnchor = { start: fmtDate(mondayOf(new Date())) };
+            saveWeekAnchor();
+        }
     }
     function occDateInWindow(dayName) {
         const idx = DAY_ORDER.indexOf(dayName);
@@ -1145,13 +1153,6 @@
         if (start.getMonth() === end.getMonth()) return `${start.getDate()} – ${end.getDate()} ${mE} ${end.getFullYear()}`;
         return `${start.getDate()} ${mS} – ${end.getDate()} ${mE} ${end.getFullYear()}`;
     }
-    function ensureWeekState() {
-        if (!weekState || !weekState.start) {
-            weekState = { start: fmtDate(mondayOf(new Date())) };
-            saveWeekState();
-        }
-    }
-
     function getInstructorName(id) {
         const f = instructors.find(i => i.id === id);
         return f ? f.name : '—';
@@ -1227,6 +1228,36 @@
         b.textContent = msg;
     }
 
+    // Kendi yazdığımız kayıtların realtime "yankısını" yok say: hızlı arka arkaya tiklerde
+    // eski bir yankı yerel veriyi ezip sonraki kayıtta tikleri kaybettirmesin.
+    const recentWrites = {};
+    function canonJson(v) {
+        const norm = x => Array.isArray(x) ? x.map(norm)
+            : (x && typeof x === 'object') ? Object.keys(x).sort().reduce((o, k) => { o[k] = norm(x[k]); return o; }, {})
+            : x;
+        return JSON.stringify(norm(JSON.parse(JSON.stringify(v === undefined ? null : v))));
+    }
+    function hashStr(str) {
+        let h = 5381;
+        for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+        return h + ':' + str.length;
+    }
+    function rememberOwnWrite(k, v) {
+        try {
+            const arr = (recentWrites[k] = recentWrites[k] || []);
+            arr.push(hashStr(canonJson(v)));
+            if (arr.length > 30) arr.shift();
+        } catch (e) {}
+    }
+    function isOwnEcho(k, v) {
+        try {
+            const arr = recentWrites[k] || [];
+            const i = arr.indexOf(hashStr(canonJson(v)));
+            if (i !== -1) { arr.splice(i, 1); return true; }
+        } catch (e) {}
+        return false;
+    }
+
     async function cloudSet(key, value) {
         try { localStorage.setItem('app_' + key, JSON.stringify(value)); } catch (e) { console.warn('Yerel yedek yazılamadı:', e); }
 
@@ -1240,6 +1271,7 @@
             return;
         }
 
+        rememberOwnWrite(key, value);
         try {
             const { error } = await sb.from('studio_data').upsert({ key: key, value: value, updated_at: new Date().toISOString() });
             if (error) {
@@ -1259,7 +1291,7 @@
     function saveInstructors() { cloudSet('instructors', instructors); }
     function saveDemos() { cloudSet('demos', demos); }
     function savePastWeeks() { cloudSet('pastWeeks', pastWeeks); }
-    function saveWeekState() { cloudSet('weekState', weekState); }
+    function saveWeekAnchor() { cloudSet('weekAnchor', weekAnchor); }
     function savePastMonths() { cloudSet('pastMonths', pastMonths); }
     function saveLessonLog() { cloudSet('lessonLog', lessonLog); }
     function saveExtraRevenue() { cloudSet('extraRevenue', extraRevenueLog); }
@@ -1289,7 +1321,7 @@
                     if (dbMap['instructors'] && Array.isArray(dbMap['instructors']) && dbMap['instructors'].length > 0) instructors = dbMap['instructors'];
                     if (dbMap['demos']) demos = dbMap['demos'];
                     if (dbMap['pastWeeks']) pastWeeks = dbMap['pastWeeks'];
-                    if (dbMap['weekState']) weekState = dbMap['weekState'];
+                    if (dbMap['weekAnchor'] && dbMap['weekAnchor'].start) weekAnchor = dbMap['weekAnchor'];
                     if (dbMap['pastMonths']) pastMonths = dbMap['pastMonths'];
                     if (dbMap['lessonLog']) lessonLog = dbMap['lessonLog'];
                     if (dbMap['extraRevenue']) extraRevenueLog = dbMap['extraRevenue'];
@@ -1334,7 +1366,7 @@
         });
         if (slotIdsMigrated) saveMembers();
 
-        ensureWeekState();
+        ensureWeekAnchor();
         renderCurrentView();
     }
 
@@ -1346,7 +1378,7 @@
         } catch (e) {}
         try { demos = JSON.parse(localStorage.getItem('app_demos') || '[]'); } catch (e) { demos = []; }
         try { pastWeeks = JSON.parse(localStorage.getItem('app_pastWeeks') || '[]'); } catch (e) { pastWeeks = []; }
-        try { const ws = JSON.parse(localStorage.getItem('app_weekState') || 'null'); if (ws && ws.start) weekState = ws; } catch (e) {}
+        try { const wa = JSON.parse(localStorage.getItem('app_weekAnchor') || 'null'); if (wa && wa.start) weekAnchor = wa; } catch (e) {}
         try { pastMonths = JSON.parse(localStorage.getItem('app_pastMonths') || '[]'); } catch (e) { pastMonths = []; }
         try { lessonLog = JSON.parse(localStorage.getItem('app_lessonLog') || '[]'); } catch (e) { lessonLog = []; }
         try { extraRevenueLog = JSON.parse(localStorage.getItem('app_extraRevenue') || '[]'); } catch (e) { extraRevenueLog = []; }
@@ -1368,11 +1400,12 @@
                 if (payload.new && payload.new.key) {
                     const k = payload.new.key;
                     const v = payload.new.value;
+                    if (isOwnEcho(k, v)) return;
                     if (k === 'members') members = v;
                     if (k === 'instructors') instructors = v;
                     if (k === 'demos') demos = v;
                     if (k === 'pastWeeks') pastWeeks = v;
-                    if (k === 'weekState' && v && v.start) weekState = v;
+                    if (k === 'weekAnchor' && v && v.start) weekAnchor = v;
                     if (k === 'pastMonths') pastMonths = v;
                     if (k === 'lessonLog') lessonLog = v;
                     if (k === 'extraRevenue') extraRevenueLog = v;
@@ -2131,16 +2164,10 @@
         return thead + tbody;
     }
 
-    function updateWeekLabel() {
-        const el = document.getElementById('weekRangeLabel');
-        if (el) el.innerHTML = `Aktif hafta: <b>${weekRangeText(getWeekStartDate())}</b> <span style="opacity:.75;">(Haftayı siz kapatana kadar değişmez)</span>`;
-    }
-
     function renderScheduleGrid() {
         const times = getAllTimeSlots();
         const cellEntries = buildCellEntries(currentInstructorFilter);
         document.getElementById('schedTable').innerHTML = scheduleTableHtml(cellEntries, times);
-        updateWeekLabel();
         renderMobileScheduleView(cellEntries, times);
     }
 
@@ -2218,6 +2245,15 @@
         if (!slot.attendance) slot.attendance = {};
         if (slot.attendance[occDate]) return; // aynı ders için çifte yoklamayı engelle
 
+        // Henüz gerçekleşmemiş (gelecek tarihli) derse tik/çarpı atılamaz
+        const actualDate = (slot.override && slot.override.active && slot.override.forOccDate === occDate)
+            ? fmtDate(occDateInWindow(slot.override.day)) : occDate;
+        if (actualDate > todayStr()) {
+            const [, mm, dd] = actualDate.split('-');
+            alert(`Bu ders ${dd}.${mm} tarihinde, henüz gerçekleşmedi. Tik/çarpı dersin gününde veya sonrasında atılabilir.`);
+            return;
+        }
+
         if (m.frozenUntil) delete m.frozenUntil;
 
         const lessonInstId = slot.override?.active ? (slot.override.instructorId || slot.instructorId) : slot.instructorId;
@@ -2292,10 +2328,51 @@
         return out;
     }
 
+    // Verilen Pazartesi haftası için (tablo/tarih hesapları o haftaya göre) işlem yapar
+    function withWeek(startStr, fn) {
+        const prev = weekOverride;
+        weekOverride = startStr;
+        try { return fn(); } finally { weekOverride = prev; }
+    }
+
+    // "19", "19.10", "19.10.2026" veya "2026-10-19" yazımlarını kabul eder; Pazartesi olmalı
+    function parseMondayInput(input) {
+        const str = (input || '').trim();
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        let d = null, m;
+        if ((m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) d = new Date(+m[1], +m[2] - 1, +m[3]);
+        else if ((m = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/))) d = new Date(+m[3], +m[2] - 1, +m[1]);
+        else if ((m = str.match(/^(\d{1,2})[./-](\d{1,2})$/))) d = new Date(today.getFullYear(), +m[2] - 1, +m[1]);
+        else if ((m = str.match(/^(\d{1,2})$/))) {
+            // Sadece gün yazıldıysa: bugüne en yakın, o gün numaralı Pazartesi
+            let best = null;
+            for (let off = -1; off <= 1; off++) {
+                const c = new Date(today.getFullYear(), today.getMonth() + off, +m[1]);
+                if (c.getDate() !== +m[1] || c.getDay() !== 1) continue;
+                if (!best || Math.abs(c - today) < Math.abs(best - today)) best = c;
+            }
+            return best ? { date: best } : { error: `"${m[1]}" tarihli bir Pazartesi bulunamadı. Lütfen haftanın PAZARTESİ gününün tarihini yazın.` };
+        } else {
+            return { error: 'Tarih anlaşılamadı. Örnek: 19  veya  19.10.2026' };
+        }
+        if (!d || isNaN(d)) return { error: 'Tarih anlaşılamadı. Örnek: 19  veya  19.10.2026' };
+        if (d.getDay() !== 1) return { error: `Bu tarih bir ${JS_DOW[d.getDay()]} günü. Lütfen haftanın PAZARTESİ gününün tarihini yazın.` };
+        return { date: d };
+    }
+
+    let pendingCloseStart = null;
     document.getElementById('endWeekBtn').addEventListener('click', () => {
         if (role !== 'sahibi') return;
-        const pending = collectUnmarkedEntries();
-        if (!pending.length) { finalizeWeek(); return; }
+        const def = getWeekStartDate(); // ekrandaki (kaydedilmemiş) haftanın Pazartesi'si
+        const input = prompt('Kaydedilecek haftanın PAZARTESİ gününün tarihini yazın.\nÖrnek: 19   veya   19.10.2026', `${def.getDate()}.${def.getMonth() + 1}.${def.getFullYear()}`);
+        if (input === null || !input.trim()) return;
+        const r = parseMondayInput(input);
+        if (r.error) return alert(r.error);
+        const startStr = fmtDate(r.date);
+        pendingCloseStart = startStr;
+
+        const pending = withWeek(startStr, collectUnmarkedEntries);
+        if (!pending.length) { finalizeWeek(startStr); return; }
 
         let html = '';
         let lastDay = null;
@@ -2307,80 +2384,71 @@
             }
             html += `<div style="font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;margin-bottom:4px;background:var(--bg);">${p.time} · <b>${escapeHtml(p.name)}</b> <span style="color:var(--ink-soft);">(${escapeHtml(p.inst)})</span>${p.moved ? ' <span style="color:var(--clay);">· taşınan ders</span>' : ''}</div>`;
         });
-        document.getElementById('weekWarnBody').innerHTML = `<div style="font-size:13px;margin-bottom:6px;"><b>${pending.length}</b> ders işaretlenmemiş:</div>` + html;
+        document.getElementById('weekWarnBody').innerHTML = `<div style="font-size:13px;margin-bottom:6px;"><b>${weekRangeText(r.date)}</b> haftasında <b>${pending.length}</b> ders işaretlenmemiş:</div>` + html;
         openPanel('weekWarnPanel');
     });
     document.getElementById('weekWarnBackBtn').addEventListener('click', closeAllPanels);
-    document.getElementById('weekWarnSaveBtn').addEventListener('click', () => { closeAllPanels(); finalizeWeek(); });
+    document.getElementById('weekWarnSaveBtn').addEventListener('click', () => { closeAllPanels(); finalizeWeek(pendingCloseStart); });
 
-    function finalizeWeek() {
-        if (role !== 'sahibi') return;
-        const start = getWeekStartDate();
+    function finalizeWeek(startStr) {
+        if (role !== 'sahibi' || !startStr) return;
+        const start = parseDateStr(startStr);
         const end = new Date(start); end.setDate(end.getDate() + 6);
         const endStr = fmtDate(end);
         const weekName = `${weekRangeText(start)} Haftası`;
-        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nKayıt, tablo görüntüsü olarak saklanır (sonradan üye silinse bile değişmez). Kaydın ardından yeni hafta başlar.`)) return;
+
+        if (pastWeeks.some(w => w.weekStart === startStr) && !confirm(`"${weekName}" daha önce kaydedilmiş. Yine de bir kez daha kaydedilsin mi?`)) return;
+        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nKayıt, tablo görüntüsü olarak saklanır (sonradan üye silinse bile değişmez). Bu haftanın tik/çarpıları kayıttan sonra programdan temizlenir ve bir sonraki hafta açılır.`)) return;
         const typed = prompt('Onaylamak için BİTİR yazın (iptal için boş bırakın):');
         if (!typed || typed.trim().toLocaleUpperCase('tr-TR') !== 'BİTİR') {
-            alert('Hafta kapatılmadı. Hiçbir şey değiştirilmedi.');
+            alert('Hafta kaydedilmedi. Hiçbir şey değiştirilmedi.');
             return;
         }
 
-        let packageTypeCounts = {};
-        PACKAGES.forEach(p => { packageTypeCounts[p.name] = 0; });
-        members.forEach(m => {
-            (m.schedule || []).forEach(slot => {
-                const occDate = fmtDate(occDateInWindow(slot.day));
-                if ((slot.attendance || {})[occDate] === 'completed') {
-                    packageTypeCounts[m.type] = (packageTypeCounts[m.type] || 0) + 1;
-                }
-            });
-        });
-
-        // Tüm hocaları içeren değişmez görüntü + yapısal kayıt (üye silinse bile korunur)
-        const cellEntries = buildCellEntries('all');
-        const tableHtml = sanitizeArchivedTable(scheduleTableHtml(cellEntries, getAllTimeSlots()));
-        const entries = [];
-        Object.keys(cellEntries).forEach(k => {
-            const [day, time] = k.split('|');
-            cellEntries[k].forEach(e => {
-                let status = e.attendance || (e.moved ? 'moved' : e.postponed ? 'postponed' : e.frozen ? 'frozen' : 'pending');
-                entries.push({
-                    memberId: e.memberId, name: e.memberName, type: e.type, day, time,
-                    instructor: getInstructorName(e.instructorId), date: e.occDate,
-                    status, movedTo: e.movedTo || '', movedLesson: !!e.virtual
+        const snap = withWeek(startStr, () => {
+            let packageTypeCounts = {};
+            PACKAGES.forEach(p => { packageTypeCounts[p.name] = 0; });
+            members.forEach(m => {
+                (m.schedule || []).forEach(slot => {
+                    const occDate = fmtDate(occDateInWindow(slot.day));
+                    if ((slot.attendance || {})[occDate] === 'completed') {
+                        packageTypeCounts[m.type] = (packageTypeCounts[m.type] || 0) + 1;
+                    }
                 });
             });
-        });
 
-        // Geri açabilmek için kapanan haftanın tik/çarpı/taşıma bilgisini sakla
-        const restoreSlots = [];
-        members.forEach(m => {
-            (m.schedule || []).forEach(slot => {
-                const att = {}, ded = {};
-                Object.keys(slot.attendance || {}).forEach(d => { if (d <= endStr) att[d] = slot.attendance[d]; });
-                Object.keys(slot.deducted || {}).forEach(d => { if (d <= endStr) ded[d] = slot.deducted[d]; });
-                const ov = (slot.override && (!slot.override.forOccDate || slot.override.forOccDate <= endStr)) ? slot.override : null;
-                const po = (slot.postponedOccDate && slot.postponedOccDate <= endStr) ? slot.postponedOccDate : null;
-                if (Object.keys(att).length || ov || po) restoreSlots.push({ memberId: m.id, slotId: slot.id, attendance: att, deducted: ded, override: ov, postponedOccDate: po });
+            // Tüm hocaları içeren değişmez görüntü + yapısal kayıt (üye silinse bile korunur)
+            const cellEntries = buildCellEntries('all');
+            const tableHtml = sanitizeArchivedTable(scheduleTableHtml(cellEntries, getAllTimeSlots()));
+            const entries = [];
+            Object.keys(cellEntries).forEach(k => {
+                const [day, time] = k.split('|');
+                cellEntries[k].forEach(e => {
+                    const status = e.attendance || (e.moved ? 'moved' : e.postponed ? 'postponed' : e.frozen ? 'frozen' : 'pending');
+                    entries.push({
+                        memberId: e.memberId, name: e.memberName, type: e.type, day, time,
+                        instructor: getInstructorName(e.instructorId), date: e.occDate,
+                        status, movedTo: e.movedTo || '', movedLesson: !!e.virtual
+                    });
+                });
             });
+            return { packageTypeCounts, tableHtml, entries };
         });
 
         pastWeeks.push({
             id: uid('pw'),
             name: weekName,
             date: todayStr(),
-            weekStart: fmtDate(start),
+            weekStart: startStr,
             weekEnd: endStr,
             closedAt: new Date().toISOString(),
             closedByRole: role,
-            tableHtml: tableHtml,
-            entries: entries,
-            restore: { slots: restoreSlots },
-            packageCounts: packageTypeCounts
+            tableHtml: snap.tableHtml,
+            entries: snap.entries,
+            packageCounts: snap.packageTypeCounts
         });
 
-        // Kapanan haftaya ait (tarihi <= hafta sonu) kayıtları temizle
+        // Kaydedilen haftaya ait (tarihi <= hafta sonu) tik/çarpı ve taşıma kayıtlarını temizle
         members.forEach(m => {
             (m.schedule || []).forEach(slot => {
                 Object.keys(slot.attendance || {}).forEach(d => { if (d <= endStr) delete slot.attendance[d]; });
@@ -2390,101 +2458,20 @@
             });
         });
 
-        // Yeni haftaya geç (geç kapatıldıysa bugünkü haftaya atla)
-        let next = new Date(start); next.setDate(next.getDate() + 7);
-        const cur = mondayOf(new Date());
-        if (cur > next) next = cur;
-        weekState = { start: fmtDate(next) };
-
-        savePastWeeks();
-        saveMembers();
-        saveWeekState();
-        alert(`Hafta kaydedildi ve Geçmiş Haftalar sekmesine eklendi.\nYeni hafta: ${weekRangeText(next)}`);
-        renderCurrentView();
-    }
-
-    // Son kaydedilen haftayı geri açar: aktif hafta eski haline döner, tik/çarpılar geri gelir
-    window.reopenWeek = function(id) {
-        if (role !== 'sahibi') return;
-        const pw = pastWeeks.find(x => x.id === id);
-        if (!pw) return;
-        if (pastWeeks[pastWeeks.length - 1].id !== id) return alert('Yalnızca en son kaydedilen hafta geri açılabilir.');
-        if (!pw.weekStart) return alert('Bu eski kayıtta hafta tarihi yok, geri açılamıyor.');
-        if (!confirm(`"${pw.name}" geri açılsın mı?\n\nAktif hafta bu haftaya döner, tik/çarpılar geri gelir ve bu kayıt Geçmiş Haftalar'dan kaldırılır.`)) return;
-
-        let restoredCount = 0;
-        if (pw.restore && pw.restore.slots) {
-            pw.restore.slots.forEach(r => {
-                const m = members.find(x => x.id === r.memberId);
-                const slot = m && (m.schedule || []).find(x => x.id === r.slotId);
-                if (!slot) return;
-                slot.attendance = Object.assign(slot.attendance || {}, r.attendance || {});
-                if (r.deducted && Object.keys(r.deducted).length) slot.deducted = Object.assign(slot.deducted || {}, r.deducted);
-                if (r.override) slot.override = r.override;
-                if (r.postponedOccDate) slot.postponedOccDate = r.postponedOccDate;
-                restoredCount += Object.keys(r.attendance || {}).length;
-            });
-        } else {
-            // Eski kayıt: tablo kaydındaki bilgiden tik/çarpıları geri kur (taşınan/ertelenen dersler geri gelmez)
-            (pw.entries || []).forEach(e => {
-                if ((e.status !== 'completed' && e.status !== 'missed') || e.movedLesson) return;
-                const m = members.find(x => x.id === e.memberId);
-                const slot = m && (m.schedule || []).find(x => x.day === e.day && x.time === e.time);
-                if (!slot) return;
-                if (!slot.attendance) slot.attendance = {};
-                slot.attendance[e.date] = e.status;
-                restoredCount++;
-            });
+        // Ekrandaki hafta kaydedildiyse bir sonraki haftaya geç (sadece kullanıcı kaydedince ilerler)
+        let nextTxt = '';
+        if (!weekAnchor || !weekAnchor.start || startStr >= weekAnchor.start) {
+            const next = new Date(start); next.setDate(next.getDate() + 7);
+            weekAnchor = { start: fmtDate(next) };
+            saveWeekAnchor();
+            nextTxt = `\nYeni hafta: ${weekRangeText(next)}`;
         }
 
-        weekState = { start: pw.weekStart };
-        pastWeeks = pastWeeks.filter(x => x.id !== id);
         savePastWeeks();
         saveMembers();
-        saveWeekState();
-        closeAllPanels();
-        alert(`Hafta geri açıldı. ${restoredCount} tik/çarpı geri yüklendi.`);
+        alert('Hafta kaydedildi ve Geçmiş Haftalar sekmesine eklendi.' + nextTxt);
         renderCurrentView();
-    };
-
-    // Silinmiş/kaybolmuş haftayı kurtarma: aktif haftayı geri alır, yapılan dersleri (✓) ders kaydından yeniden kurar.
-    // Seans sayısına DOKUNMAZ (zaten düşülmüş). Çarpılar (gelmedi) ders kaydında olmadığı için kurtarılamaz.
-    document.getElementById('recoverWeekBtn').addEventListener('click', () => {
-        if (role !== 'sahibi') return;
-        const prev = getWeekStartDate(); prev.setDate(prev.getDate() - 7);
-        const input = prompt('Kurtarılacak haftanın PAZARTESİ tarihini yazın (YYYY-AA-GG):', fmtDate(prev));
-        if (!input) return;
-        const str = input.trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return alert('Tarih biçimi hatalı. Örnek: 2026-10-19');
-        const start = parseDateStr(str);
-        if (isNaN(start) || start.getDay() !== 1) return alert('Bu tarih bir Pazartesi değil.');
-        const end = new Date(start); end.setDate(end.getDate() + 6);
-        const endStr = fmtDate(end);
-        if (!confirm(`Aktif hafta ${weekRangeText(start)} olarak ayarlansın ve o haftanın yapılan dersleri ders kaydından geri yüklensin mi?\n\nSeans sayıları değişmez.`)) return;
-
-        let restored = 0;
-        lessonLog.forEach(l => {
-            if (!l.date || l.date < str || l.date > endStr) return;
-            const m = members.find(x => x.id === l.memberId);
-            if (!m) return;
-            const dayName = JS_DOW[parseDateStr(l.date).getDay()];
-            const cands = (m.schedule || []).filter(sl => sl.day === dayName);
-            if (!cands.length) return;
-            const slot = cands.find(sl => sl.instructorId === l.instructorId) || cands[0];
-            if (!slot.attendance) slot.attendance = {};
-            if (slot.attendance[l.date]) return;
-            slot.attendance[l.date] = 'completed';
-            if (!slot.deducted) slot.deducted = {};
-            slot.deducted[l.date] = true;
-            restored++;
-        });
-
-        weekState = { start: str };
-        saveMembers();
-        saveWeekState();
-        alert(`Aktif hafta ${weekRangeText(start)} olarak ayarlandı. ${restored} yapılan ders (✓) geri yüklendi.\n\nÇarpı (gelmedi) işaretleri kurtarılamaz; gerekiyorsa elle tekrar işaretleyin.`);
-        renderCurrentView();
-    });
+    }
 
     function renderPastSplitView() {
         const isOwner = role === 'sahibi';
@@ -2558,8 +2545,7 @@
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:0 0 10px;">Tamamlanan Seans Dağılımı</h4>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">${countsHtml || '<div style="color:var(--ink-soft);padding:6px;">Bu hafta tamamlanan seans kaydı yok.</div>'}</div>
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:0 0 10px;">Haftalık Tablo Görüntüsü</h4>
-            <div class="snap-wrap"><table class="sched-table">${sanitizeArchivedTable(pw.tableHtml)}</table></div>
-            ${(role === 'sahibi' && pastWeeks[pastWeeks.length - 1].id === pw.id) ? `<div style="margin-top:14px;"><button class="btn-ghost" onclick="reopenWeek('${pw.id}')">↩️ Bu Haftayı Geri Aç (yanlışlıkla / deneme kaydı)</button></div>` : ''}`;
+            <div class="snap-wrap"><table class="sched-table">${sanitizeArchivedTable(pw.tableHtml)}</table></div>`;
         openPanel('weekDetailPanel');
     };
 
