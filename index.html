@@ -789,6 +789,9 @@
             <div style="margin-top:20px;display:flex;justify-content:flex-end;">
                 <button class="btn-add" id="endWeekBtn" style="background:var(--clay);font-size:15px;padding:12px 20px;width:100%;">🏁 Bu Haftayı Bitir ve Kaydet</button>
             </div>
+            <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+                <button class="btn-ghost" id="recoverWeekBtn" style="font-size:12.5px;">🛠️ Yanlışlıkla Kapanan Haftayı Kurtar</button>
+            </div>
         </div>
 
         <!-- DEMO/BOŞLUK SEKME -->
@@ -2443,6 +2446,45 @@
         alert(`Hafta geri açıldı. ${restoredCount} tik/çarpı geri yüklendi.`);
         renderCurrentView();
     };
+
+    // Silinmiş/kaybolmuş haftayı kurtarma: aktif haftayı geri alır, yapılan dersleri (✓) ders kaydından yeniden kurar.
+    // Seans sayısına DOKUNMAZ (zaten düşülmüş). Çarpılar (gelmedi) ders kaydında olmadığı için kurtarılamaz.
+    document.getElementById('recoverWeekBtn').addEventListener('click', () => {
+        if (role !== 'sahibi') return;
+        const prev = getWeekStartDate(); prev.setDate(prev.getDate() - 7);
+        const input = prompt('Kurtarılacak haftanın PAZARTESİ tarihini yazın (YYYY-AA-GG):', fmtDate(prev));
+        if (!input) return;
+        const str = input.trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return alert('Tarih biçimi hatalı. Örnek: 2026-10-19');
+        const start = parseDateStr(str);
+        if (isNaN(start) || start.getDay() !== 1) return alert('Bu tarih bir Pazartesi değil.');
+        const end = new Date(start); end.setDate(end.getDate() + 6);
+        const endStr = fmtDate(end);
+        if (!confirm(`Aktif hafta ${weekRangeText(start)} olarak ayarlansın ve o haftanın yapılan dersleri ders kaydından geri yüklensin mi?\n\nSeans sayıları değişmez.`)) return;
+
+        let restored = 0;
+        lessonLog.forEach(l => {
+            if (!l.date || l.date < str || l.date > endStr) return;
+            const m = members.find(x => x.id === l.memberId);
+            if (!m) return;
+            const dayName = JS_DOW[parseDateStr(l.date).getDay()];
+            const cands = (m.schedule || []).filter(sl => sl.day === dayName);
+            if (!cands.length) return;
+            const slot = cands.find(sl => sl.instructorId === l.instructorId) || cands[0];
+            if (!slot.attendance) slot.attendance = {};
+            if (slot.attendance[l.date]) return;
+            slot.attendance[l.date] = 'completed';
+            if (!slot.deducted) slot.deducted = {};
+            slot.deducted[l.date] = true;
+            restored++;
+        });
+
+        weekState = { start: str };
+        saveMembers();
+        saveWeekState();
+        alert(`Aktif hafta ${weekRangeText(start)} olarak ayarlandı. ${restored} yapılan ders (✓) geri yüklendi.\n\nÇarpı (gelmedi) işaretleri kurtarılamaz; gerekiyorsa elle tekrar işaretleyin.`);
+        renderCurrentView();
+    });
 
     function renderPastSplitView() {
         const isOwner = role === 'sahibi';
