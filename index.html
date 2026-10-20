@@ -466,6 +466,19 @@
     }
     .att-status.completed { background: #D5E4CA; color: #2E4522; border: 1px solid #BACFB0; }
     .att-status.missed { background: #F8D7DA; color: #842029; border: 1px solid #F5C2C7; }
+    /* Geçmiş hafta detayı: tam ekran, tablo sığdırılmış */
+    #weekDetailPanel.panel { width: 100vw; max-width: 100vw; padding: 20px 18px; }
+    #weekDetailPanel .snap-wrap {
+        overflow: auto; max-width: 100%;
+        max-height: calc(100vh - 250px);
+        border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    }
+    #weekDetailPanel table.sched-table { min-width: 0; table-layout: fixed; }
+    #weekDetailPanel table.sched-table td.slot-cell { min-width: 0; padding: 3px; }
+    #weekDetailPanel table.sched-table td.time-cell { width: 58px; padding: 6px 8px; }
+    #weekDetailPanel table.sched-table thead th { font-size: 12px; padding: 8px 4px; }
+    #weekDetailPanel .cell-entry { font-size: 11px; padding: 4px 5px; }
+    body.is-mobile-view #weekDetailPanel table.sched-table { min-width: 820px; }
     .att-status.none { background: #EFEDE8; color: #6B665C; border: 1px solid #DAD6CC; }
     .en-tag { display: inline-block; text-decoration: none !important; font-weight: 500; font-size: 10.5px; }
     .th-date { font-size: 10.5px; font-weight: 500; opacity: .7; }
@@ -914,7 +927,7 @@
     </div>
 
     <!-- GEÇMİŞ HAFTA DETAYI PANELİ -->
-    <div class="panel" id="weekDetailPanel" style="width:520px;">
+    <div class="panel" id="weekDetailPanel">
         <h2 id="weekDetailTitle">Hafta Detayı</h2>
         <div id="weekDetailBody"></div>
         <div class="panel-actions"><button class="btn-secondary" style="flex:1;" id="weekDetailCloseBtn">Kapat</button></div>
@@ -2337,6 +2350,19 @@
             });
         });
 
+        // Geri açabilmek için kapanan haftanın tik/çarpı/taşıma bilgisini sakla
+        const restoreSlots = [];
+        members.forEach(m => {
+            (m.schedule || []).forEach(slot => {
+                const att = {}, ded = {};
+                Object.keys(slot.attendance || {}).forEach(d => { if (d <= endStr) att[d] = slot.attendance[d]; });
+                Object.keys(slot.deducted || {}).forEach(d => { if (d <= endStr) ded[d] = slot.deducted[d]; });
+                const ov = (slot.override && (!slot.override.forOccDate || slot.override.forOccDate <= endStr)) ? slot.override : null;
+                const po = (slot.postponedOccDate && slot.postponedOccDate <= endStr) ? slot.postponedOccDate : null;
+                if (Object.keys(att).length || ov || po) restoreSlots.push({ memberId: m.id, slotId: slot.id, attendance: att, deducted: ded, override: ov, postponedOccDate: po });
+            });
+        });
+
         pastWeeks.push({
             id: uid('pw'),
             name: weekName,
@@ -2347,6 +2373,7 @@
             closedByRole: role,
             tableHtml: tableHtml,
             entries: entries,
+            restore: { slots: restoreSlots },
             packageCounts: packageTypeCounts
         });
 
@@ -2372,6 +2399,50 @@
         alert(`Hafta kaydedildi ve Geçmiş Haftalar sekmesine eklendi.\nYeni hafta: ${weekRangeText(next)}`);
         renderCurrentView();
     }
+
+    // Son kaydedilen haftayı geri açar: aktif hafta eski haline döner, tik/çarpılar geri gelir
+    window.reopenWeek = function(id) {
+        if (role !== 'sahibi') return;
+        const pw = pastWeeks.find(x => x.id === id);
+        if (!pw) return;
+        if (pastWeeks[pastWeeks.length - 1].id !== id) return alert('Yalnızca en son kaydedilen hafta geri açılabilir.');
+        if (!pw.weekStart) return alert('Bu eski kayıtta hafta tarihi yok, geri açılamıyor.');
+        if (!confirm(`"${pw.name}" geri açılsın mı?\n\nAktif hafta bu haftaya döner, tik/çarpılar geri gelir ve bu kayıt Geçmiş Haftalar'dan kaldırılır.`)) return;
+
+        let restoredCount = 0;
+        if (pw.restore && pw.restore.slots) {
+            pw.restore.slots.forEach(r => {
+                const m = members.find(x => x.id === r.memberId);
+                const slot = m && (m.schedule || []).find(x => x.id === r.slotId);
+                if (!slot) return;
+                slot.attendance = Object.assign(slot.attendance || {}, r.attendance || {});
+                if (r.deducted && Object.keys(r.deducted).length) slot.deducted = Object.assign(slot.deducted || {}, r.deducted);
+                if (r.override) slot.override = r.override;
+                if (r.postponedOccDate) slot.postponedOccDate = r.postponedOccDate;
+                restoredCount += Object.keys(r.attendance || {}).length;
+            });
+        } else {
+            // Eski kayıt: tablo kaydındaki bilgiden tik/çarpıları geri kur (taşınan/ertelenen dersler geri gelmez)
+            (pw.entries || []).forEach(e => {
+                if ((e.status !== 'completed' && e.status !== 'missed') || e.movedLesson) return;
+                const m = members.find(x => x.id === e.memberId);
+                const slot = m && (m.schedule || []).find(x => x.day === e.day && x.time === e.time);
+                if (!slot) return;
+                if (!slot.attendance) slot.attendance = {};
+                slot.attendance[e.date] = e.status;
+                restoredCount++;
+            });
+        }
+
+        weekState = { start: pw.weekStart };
+        pastWeeks = pastWeeks.filter(x => x.id !== id);
+        savePastWeeks();
+        saveMembers();
+        saveWeekState();
+        closeAllPanels();
+        alert(`Hafta geri açıldı. ${restoredCount} tik/çarpı geri yüklendi.`);
+        renderCurrentView();
+    };
 
     function renderPastSplitView() {
         const isOwner = role === 'sahibi';
@@ -2445,7 +2516,8 @@
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:0 0 10px;">Tamamlanan Seans Dağılımı</h4>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">${countsHtml || '<div style="color:var(--ink-soft);padding:6px;">Bu hafta tamamlanan seans kaydı yok.</div>'}</div>
             <h4 style="font-size:13px;color:var(--ink-soft);text-transform:uppercase;margin:0 0 10px;">Haftalık Tablo Görüntüsü</h4>
-            <div class="sched-table-wrap" style="max-height:380px;overflow-y:auto;"><table class="sched-table">${sanitizeArchivedTable(pw.tableHtml)}</table></div>`;
+            <div class="snap-wrap"><table class="sched-table">${sanitizeArchivedTable(pw.tableHtml)}</table></div>
+            ${(role === 'sahibi' && pastWeeks[pastWeeks.length - 1].id === pw.id) ? `<div style="margin-top:14px;"><button class="btn-ghost" onclick="reopenWeek('${pw.id}')">↩️ Bu Haftayı Geri Aç (yanlışlıkla / deneme kaydı)</button></div>` : ''}`;
         openPanel('weekDetailPanel');
     };
 
