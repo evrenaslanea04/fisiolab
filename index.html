@@ -466,6 +466,11 @@
     }
     .att-status.completed { background: #D5E4CA; color: #2E4522; border: 1px solid #BACFB0; }
     .att-status.missed { background: #F8D7DA; color: #842029; border: 1px solid #F5C2C7; }
+    .att-status.none { background: #EFEDE8; color: #6B665C; border: 1px solid #DAD6CC; }
+    .en-tag { display: inline-block; text-decoration: none !important; font-weight: 500; font-size: 10.5px; }
+    .th-date { font-size: 10.5px; font-weight: 500; opacity: .7; }
+    .week-range { font-size: 13px; color: var(--ink-soft); margin: 4px 0 10px; }
+    .week-range b { color: var(--ink); }
 
     .demo-inst-row {
         padding: 5px 6px;
@@ -762,6 +767,7 @@
             <div class="controls">
                 <div id="instructorTabs" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
             </div>
+            <div class="week-range" id="weekRangeLabel"></div>
             <div class="mobile-day-selector" id="mobileDaySelector"></div>
             <div class="mobile-schedule-timeline" id="mobileScheduleTimeline"></div>
             <div class="sched-table-wrap">
@@ -772,7 +778,7 @@
             </div>
         </div>
 
-        <!-- DEMO PROGRAMI SEKME -->
+        <!-- DEMO/BOŞLUK SEKME -->
         <div class="view" id="view-demoSchedule">
             <div class="controls" style="justify-content:space-between;">
                 <button class="btn-add" id="demoGlobalAddBtn" onclick="openDemoAddModal('Pazartesi', '10:00', instructors[0]?.id)">+ Demo Seans Ekle</button>
@@ -961,7 +967,7 @@
         </div>
         <div id="entryChangeForm" style="display:none;">
             <div class="field"><label>Yeni Gün</label><select id="ea-new-day"></select></div>
-            <div class="field"><label>Yeni Saat</label><input id="ea-new-time" type="time"/></div>
+            <div class="field"><label>Yeni Saat</label><select id="ea-new-time"></select></div>
             <div class="field"><label>Yeni Hoca</label><select id="ea-new-instructor"></select></div>
             <div class="panel-actions">
                 <button class="btn-secondary" id="eaChangeCancel">Vazgeç</button>
@@ -975,9 +981,21 @@
     <div class="panel" id="virtualCancelPanel">
         <h2 id="vcTitle">Tek Seferlik Değişiklik</h2>
         <p id="vcSub" style="color:var(--ink-soft);font-size:13px;margin-bottom:16px;"></p>
+        <button class="action-menu-btn" id="vcUndoBtn" style="background:#FFF3CD;color:#856404;border-color:#FFEEBA;display:none;">↩️ Yoklamayı Geri Al / Düzelt</button>
         <div class="panel-actions">
             <button class="btn-secondary" id="vcCloseBtn">Kapat</button>
             <button class="btn-primary" id="vcCancelBtn" style="background:var(--alert);">Değişikliği İptal Et</button>
+        </div>
+    </div>
+
+    <!-- HAFTA KAPATMA UYARI PANELİ -->
+    <div class="panel" id="weekWarnPanel">
+        <h2>⚠️ İşaretlenmemiş Dersler</h2>
+        <p style="color:var(--ink-soft);font-size:13px;margin-bottom:12px;">Bu haftada tik/çarpı atılmamış dersler var. Geri dönüp işaretleyebilir ya da bu şekilde kaydedebilirsiniz. Bu şekilde kaydederseniz bu dersler geçmiş haftada "İşaretlenmedi" olarak görünür.</p>
+        <div id="weekWarnBody"></div>
+        <div class="panel-actions" style="flex-direction:column;">
+            <button class="btn-primary" id="weekWarnBackBtn">Geri Dön, İşaretleyeyim</button>
+            <button class="btn-secondary" id="weekWarnSaveBtn">Bu Şekilde Kaydet</button>
         </div>
     </div>
 
@@ -1038,6 +1056,7 @@
     }
     rebuildPackageMaps();
 
+    const SHORT_DAY = { 'Pazartesi':'Pzt', 'Salı':'Sal', 'Çarşamba':'Çar', 'Perşembe':'Per', 'Cuma':'Cum', 'Cumartesi':'Cmt', 'Pazar':'Paz' };
     const DAY_ORDER = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
     const JS_DOW = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
 
@@ -1050,6 +1069,7 @@
     ];
     let demos = [];
     let pastWeeks = [];
+    let weekState = { start: null }; // aktif haftanın pazartesi tarihi (YYYY-MM-DD); yalnızca 'Haftayı Bitir' ile ilerler
     let pastMonths = [];
     let lessonLog = [];
     let extraRevenueLog = [];
@@ -1071,7 +1091,7 @@
 
     const listArea = document.getElementById('listArea');
     const overlay = document.getElementById('overlay');
-    const ALL_PANEL_IDS = ['panel', 'paymentPanel', 'freezePanel', 'demoAddPanel', 'entryActionPanel', 'virtualCancelPanel', 'adminLoginPanel', 'changePassPanel', 'historyPanel', 'weekDetailPanel', 'monthDetailPanel', 'pricePanel'];
+    const ALL_PANEL_IDS = ['panel', 'paymentPanel', 'freezePanel', 'demoAddPanel', 'entryActionPanel', 'virtualCancelPanel', 'weekWarnPanel', 'adminLoginPanel', 'changePassPanel', 'historyPanel', 'weekDetailPanel', 'monthDetailPanel', 'pricePanel'];
     const panels = ALL_PANEL_IDS.map(id => document.getElementById(id));
 
     function uid(p) { return p + '_' + Date.now() + '_' + Math.floor(Math.random() * 1000); }
@@ -1081,13 +1101,39 @@
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
-    function occDateInWindow(dayName, now) {
-        const targetDow = JS_DOW.indexOf(dayName);
-        const d = new Date(now);
-        d.setHours(0, 0, 0, 0);
-        const offset = (targetDow - d.getDay() + 7) % 7;
-        d.setDate(d.getDate() + offset);
+    function mondayOf(d) {
+        const x = new Date(d);
+        x.setHours(0, 0, 0, 0);
+        x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+        return x;
+    }
+    function parseDateStr(str) {
+        const [y, m, d] = str.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    // Aktif haftanın başlangıcı: kullanıcı haftayı kapatana kadar SABİT kalır (gün değişince kaymaz)
+    function getWeekStartDate() {
+        return (weekState && weekState.start) ? parseDateStr(weekState.start) : mondayOf(new Date());
+    }
+    function occDateInWindow(dayName) {
+        const idx = DAY_ORDER.indexOf(dayName);
+        const d = getWeekStartDate();
+        d.setDate(d.getDate() + (idx < 0 ? 0 : idx));
         return d;
+    }
+    function weekRangeText(start) {
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        const mS = start.toLocaleString('tr-TR', { month: 'long' });
+        const mE = end.toLocaleString('tr-TR', { month: 'long' });
+        if (start.getMonth() === end.getMonth()) return `${start.getDate()} – ${end.getDate()} ${mE} ${end.getFullYear()}`;
+        return `${start.getDate()} ${mS} – ${end.getDate()} ${mE} ${end.getFullYear()}`;
+    }
+    function ensureWeekState() {
+        if (!weekState || !weekState.start) {
+            weekState = { start: fmtDate(mondayOf(new Date())) };
+            saveWeekState();
+        }
     }
 
     function getInstructorName(id) {
@@ -1197,6 +1243,7 @@
     function saveInstructors() { cloudSet('instructors', instructors); }
     function saveDemos() { cloudSet('demos', demos); }
     function savePastWeeks() { cloudSet('pastWeeks', pastWeeks); }
+    function saveWeekState() { cloudSet('weekState', weekState); }
     function savePastMonths() { cloudSet('pastMonths', pastMonths); }
     function saveLessonLog() { cloudSet('lessonLog', lessonLog); }
     function saveExtraRevenue() { cloudSet('extraRevenue', extraRevenueLog); }
@@ -1226,6 +1273,7 @@
                     if (dbMap['instructors'] && Array.isArray(dbMap['instructors']) && dbMap['instructors'].length > 0) instructors = dbMap['instructors'];
                     if (dbMap['demos']) demos = dbMap['demos'];
                     if (dbMap['pastWeeks']) pastWeeks = dbMap['pastWeeks'];
+                    if (dbMap['weekState']) weekState = dbMap['weekState'];
                     if (dbMap['pastMonths']) pastMonths = dbMap['pastMonths'];
                     if (dbMap['lessonLog']) lessonLog = dbMap['lessonLog'];
                     if (dbMap['extraRevenue']) extraRevenueLog = dbMap['extraRevenue'];
@@ -1270,6 +1318,7 @@
         });
         if (slotIdsMigrated) saveMembers();
 
+        ensureWeekState();
         renderCurrentView();
     }
 
@@ -1281,6 +1330,7 @@
         } catch (e) {}
         try { demos = JSON.parse(localStorage.getItem('app_demos') || '[]'); } catch (e) { demos = []; }
         try { pastWeeks = JSON.parse(localStorage.getItem('app_pastWeeks') || '[]'); } catch (e) { pastWeeks = []; }
+        try { const ws = JSON.parse(localStorage.getItem('app_weekState') || 'null'); if (ws && ws.start) weekState = ws; } catch (e) {}
         try { pastMonths = JSON.parse(localStorage.getItem('app_pastMonths') || '[]'); } catch (e) { pastMonths = []; }
         try { lessonLog = JSON.parse(localStorage.getItem('app_lessonLog') || '[]'); } catch (e) { lessonLog = []; }
         try { extraRevenueLog = JSON.parse(localStorage.getItem('app_extraRevenue') || '[]'); } catch (e) { extraRevenueLog = []; }
@@ -1306,6 +1356,7 @@
                     if (k === 'instructors') instructors = v;
                     if (k === 'demos') demos = v;
                     if (k === 'pastWeeks') pastWeeks = v;
+                    if (k === 'weekState' && v && v.start) weekState = v;
                     if (k === 'pastMonths') pastMonths = v;
                     if (k === 'lessonLog') lessonLog = v;
                     if (k === 'extraRevenue') extraRevenueLog = v;
@@ -1493,7 +1544,7 @@
         const tabs = role === 'hoca'
             ? [
                 { id: 'schedule', label: 'Ders Programı' },
-                { id: 'demoSchedule', label: 'Demo Programı' },
+                { id: 'demoSchedule', label: 'Demo/Boşluk' },
                 { id: 'members', label: 'Üyeler' },
                 { id: 'pastWeeks', label: 'Geçmiş Haftalar' },
                 { id: 'reminders', label: 'Hatırlatmalar' }
@@ -1501,7 +1552,7 @@
             : [
                 { id: 'schedule', label: 'Ders Programı' },
                 { id: 'members', label: 'Üyeler' },
-                { id: 'demoSchedule', label: 'Demo Programı' },
+                { id: 'demoSchedule', label: 'Demo/Boşluk' },
                 { id: 'multiStock', label: '💳 STOK MULTİSPORT' },
                 { id: 'pastWeeks', label: 'Geçmiş Haftalar' },
                 { id: 'finance', label: 'Gelir/Gider' },
@@ -1951,48 +2002,70 @@
         });
     }
 
-    function renderScheduleGrid() {
-        const now = new Date();
-        const times = getAllTimeSlots();
+    function entryClass(e) {
+        return e.moved ? 'moved' : e.virtual ? 'virtual' : e.postponed ? 'postponed' : e.frozen ? 'frozen' : '';
+    }
+    function entryTag(e) {
+        if (e.moved) return ` <span class="en-tag">(Taşındı → ${escapeHtml(e.movedTo || '')})</span>`;
+        if (e.virtual) return ' <span class="en-tag">(Taşınan Ders)</span>';
+        if (e.postponed) return ' <span class="en-tag">(Ertelendi)</span>';
+        if (e.frozen) return ' <span class="en-tag">(Donduruldu)</span>';
+        return '';
+    }
+
+    // Aktif haftanın tüm girdilerini üretir (hoca filtresi parametreyle)
+    function buildCellEntries(instFilter) {
         let cellEntries = {};
         function key(d, t) { return d + '|' + t; }
 
         members.forEach(m => {
             (m.schedule || []).forEach(slot => {
-                const occDate = fmtDate(occDateInWindow(slot.day, now));
-                const isMoved = slot.override && slot.override.active && slot.override.forOccDate === occDate;
+                const occDate = fmtDate(occDateInWindow(slot.day));
+                const isMoved = !!(slot.override && slot.override.active && slot.override.forOccDate === occDate);
                 const isPostponed = slot.postponedOccDate === occDate;
-                const isFrozen = m.frozenUntil && todayStr() <= m.frozenUntil;
+                const isFrozen = !!(m.frozenUntil && todayStr() <= m.frozenUntil);
+                const att = (slot.attendance || {})[occDate] || null;
 
-                if (currentInstructorFilter === 'all' || slot.instructorId === currentInstructorFilter) {
+                if (instFilter === 'all' || slot.instructorId === instFilter) {
                     const k = key(slot.day, slot.time);
                     if (!cellEntries[k]) cellEntries[k] = [];
                     cellEntries[k].push({
                         memberId: m.id, memberName: m.name, type: m.type, instructorId: slot.instructorId,
                         slotId: slot.id, occDate: occDate, frozen: isFrozen, moved: isMoved,
-                        postponed: isPostponed, attendance: (slot.attendance || {})[occDate] || null,
+                        movedTo: isMoved ? `${(SHORT_DAY[slot.override.day] || slot.override.day)} ${slot.override.time}` : '',
+                        postponed: isPostponed,
+                        // Taşınan dersin tik/çarpısı yeni yerinde gösterilir
+                        attendance: isMoved ? null : att,
                         showActions: !isMoved && !isPostponed && !isFrozen
                     });
                 }
 
                 if (isMoved) {
                     const virtInstId = slot.override.instructorId || slot.instructorId;
-                    if (currentInstructorFilter === 'all' || virtInstId === currentInstructorFilter) {
+                    if (instFilter === 'all' || virtInstId === instFilter) {
                         const k = key(slot.override.day, slot.override.time);
                         if (!cellEntries[k]) cellEntries[k] = [];
                         cellEntries[k].push({
                             memberId: m.id, memberName: m.name, type: m.type, instructorId: virtInstId,
                             slotId: slot.id, occDate: occDate, frozen: isFrozen, virtual: true,
-                            attendance: (slot.attendance || {})[occDate] || null,
+                            attendance: att,
                             showActions: true
                         });
                     }
                 }
             });
         });
+        return cellEntries;
+    }
 
-        const table = document.getElementById('schedTable');
-        let thead = '<thead><tr><th>Saat</th>' + DAY_ORDER.map(d => `<th>${d}</th>`).join('') + '</tr></thead>';
+    function scheduleTableHtml(cellEntries, times) {
+        function key(d, t) { return d + '|' + t; }
+        const ws = getWeekStartDate();
+        const pad = n => String(n).padStart(2, '0');
+        let thead = '<thead><tr><th>Saat</th>' + DAY_ORDER.map((d, i) => {
+            const dt = new Date(ws); dt.setDate(ws.getDate() + i);
+            return `<th>${d}<div class="th-date">${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}</div></th>`;
+        }).join('') + '</tr></thead>';
         let tbody = '<tbody>';
 
         times.forEach(t => {
@@ -2011,14 +2084,10 @@
                     Object.keys(grouped).forEach(instId => {
                         tbody += `<div class="inst-group-box"><div class="inst-group-title">${escapeHtml(getInstructorName(instId))}</div>`;
                         grouped[instId].forEach(e => {
-                            let cls = '';
-                            let tag = '';
-                            if (e.moved) { cls = 'moved'; tag = ' (Değişiklik)'; }
-                            else if (e.virtual) { cls = 'virtual'; tag = ' (Taşındı)'; }
-                            else if (e.postponed) { cls = 'postponed'; tag = ' (Ertelendi)'; }
-                            else if (e.frozen) { cls = 'frozen'; tag = ' (Donduruldu)'; }
+                            const cls = entryClass(e);
+                            const tag = entryTag(e);
 
-                            tbody += `<div class="cell-entry ${cls}" data-member-id="${e.memberId}" data-slot-id="${e.slotId}" data-occ-date="${e.occDate}" data-virtual="${e.virtual ? '1' : '0'}">
+                            tbody += `<div class="cell-entry ${cls}" data-member-id="${e.memberId}" data-slot-id="${e.slotId}" data-occ-date="${e.occDate}" data-virtual="${e.virtual ? '1' : '0'}" data-moved="${e.moved ? '1' : '0'}">
                                         <div class="en-name">${escapeHtml(e.memberName)}${tag}</div>
                                         <div class="en-meta">${escapeHtml(e.type)}</div>`;
 
@@ -2043,8 +2112,19 @@
             tbody += `</tr>`;
         });
         tbody += '</tbody>';
-        table.innerHTML = thead + tbody;
+        return thead + tbody;
+    }
 
+    function updateWeekLabel() {
+        const el = document.getElementById('weekRangeLabel');
+        if (el) el.innerHTML = `Aktif hafta: <b>${weekRangeText(getWeekStartDate())}</b> <span style="opacity:.75;">(Haftayı siz kapatana kadar değişmez)</span>`;
+    }
+
+    function renderScheduleGrid() {
+        const times = getAllTimeSlots();
+        const cellEntries = buildCellEntries(currentInstructorFilter);
+        document.getElementById('schedTable').innerHTML = scheduleTableHtml(cellEntries, times);
+        updateWeekLabel();
         renderMobileScheduleView(cellEntries, times);
     }
 
@@ -2074,10 +2154,10 @@
                 Object.keys(grouped).forEach(instId => {
                     html += `<div class="inst-group-box" style="margin-bottom:0;"><div class="inst-group-title">${escapeHtml(getInstructorName(instId))}</div>`;
                     grouped[instId].forEach(e => {
-                        let cls = e.moved ? 'moved' : e.virtual ? 'virtual' : e.postponed ? 'postponed' : e.frozen ? 'frozen' : '';
-                        let tag = e.moved ? ' (Değişiklik)' : e.virtual ? ' (Taşındı)' : e.postponed ? ' (Ertelendi)' : e.frozen ? ' (Donduruldu)' : '';
+                        let cls = entryClass(e);
+                        let tag = entryTag(e);
 
-                        html += `<div class="cell-entry ${cls}" style="padding:10px 8px;margin-bottom:6px;" data-member-id="${e.memberId}" data-slot-id="${e.slotId}" data-occ-date="${e.occDate}" data-virtual="${e.virtual ? '1' : '0'}">
+                        html += `<div class="cell-entry ${cls}" style="padding:10px 8px;margin-bottom:6px;" data-member-id="${e.memberId}" data-slot-id="${e.slotId}" data-occ-date="${e.occDate}" data-virtual="${e.virtual ? '1' : '0'}" data-moved="${e.moved ? '1' : '0'}">
                                     <div style="display:flex;justify-content:space-between;align-items:center;">
                                         <b style="font-size:14px;color:var(--ink);">${escapeHtml(e.memberName)}${tag}</b>
                                         <span style="font-size:11.5px;color:var(--ink-soft);">${escapeHtml(e.type)}</span>
@@ -2163,22 +2243,67 @@
     function sanitizeArchivedTable(html) {
         const tmp = document.createElement('table');
         tmp.innerHTML = html || '';
-        tmp.querySelectorAll('.attendance-actions').forEach(n => n.remove());
+        tmp.querySelectorAll('.attendance-actions').forEach(n => {
+            const sp = document.createElement('span');
+            sp.className = 'att-status none';
+            sp.textContent = '– İşaretlenmedi';
+            n.replaceWith(sp);
+        });
         tmp.querySelectorAll('[onclick]').forEach(n => n.removeAttribute('onclick'));
         tmp.querySelectorAll('.cell-entry').forEach(n => {
             n.removeAttribute('data-member-id');
             n.removeAttribute('data-slot-id');
             n.removeAttribute('data-occ-date');
             n.removeAttribute('data-virtual');
+            n.removeAttribute('data-moved');
         });
         return tmp.innerHTML;
     }
 
+    // Tik/çarpı atılmamış (bekleyen) dersleri listeler — tüm hocalar dahil
+    function collectUnmarkedEntries() {
+        const ce = buildCellEntries('all');
+        const out = [];
+        Object.keys(ce).forEach(k => {
+            const [day, time] = k.split('|');
+            ce[k].forEach(e => {
+                if (!e.attendance && e.showActions) {
+                    out.push({ name: e.memberName, day, time, inst: getInstructorName(e.instructorId), occDate: e.occDate, moved: !!e.virtual });
+                }
+            });
+        });
+        out.sort((a, b) => (DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day)) || a.time.localeCompare(b.time));
+        return out;
+    }
+
     document.getElementById('endWeekBtn').addEventListener('click', () => {
         if (role !== 'sahibi') return;
-        const now = new Date();
-        const weekName = `${now.getDate()} ${now.toLocaleString('tr-TR', { month: 'long' })} ${now.getFullYear()} Haftası`;
-        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nDikkat: Bu işlem tüm tik/çarpıları sıfırlar.`)) return;
+        const pending = collectUnmarkedEntries();
+        if (!pending.length) { finalizeWeek(); return; }
+
+        let html = '';
+        let lastDay = null;
+        pending.forEach(p => {
+            if (p.day !== lastDay) {
+                const [, mm, dd] = p.occDate.split('-');
+                html += `<div style="font-weight:700;margin:12px 0 4px;color:var(--sage-dark);">${p.day} · ${dd}.${mm}</div>`;
+                lastDay = p.day;
+            }
+            html += `<div style="font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;margin-bottom:4px;background:var(--bg);">${p.time} · <b>${escapeHtml(p.name)}</b> <span style="color:var(--ink-soft);">(${escapeHtml(p.inst)})</span>${p.moved ? ' <span style="color:var(--clay);">· taşınan ders</span>' : ''}</div>`;
+        });
+        document.getElementById('weekWarnBody').innerHTML = `<div style="font-size:13px;margin-bottom:6px;"><b>${pending.length}</b> ders işaretlenmemiş:</div>` + html;
+        openPanel('weekWarnPanel');
+    });
+    document.getElementById('weekWarnBackBtn').addEventListener('click', closeAllPanels);
+    document.getElementById('weekWarnSaveBtn').addEventListener('click', () => { closeAllPanels(); finalizeWeek(); });
+
+    function finalizeWeek() {
+        if (role !== 'sahibi') return;
+        const start = getWeekStartDate();
+        const end = new Date(start); end.setDate(end.getDate() + 6);
+        const endStr = fmtDate(end);
+        const weekName = `${weekRangeText(start)} Haftası`;
+        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nKayıt, tablo görüntüsü olarak saklanır (sonradan üye silinse bile değişmez). Kaydın ardından yeni hafta başlar.`)) return;
         const typed = prompt('Onaylamak için BİTİR yazın (iptal için boş bırakın):');
         if (!typed || typed.trim().toLocaleUpperCase('tr-TR') !== 'BİTİR') {
             alert('Hafta kapatılmadı. Hiçbir şey değiştirilmedi.');
@@ -2187,13 +2312,28 @@
 
         let packageTypeCounts = {};
         PACKAGES.forEach(p => { packageTypeCounts[p.name] = 0; });
-
         members.forEach(m => {
             (m.schedule || []).forEach(slot => {
-                const occDate = fmtDate(occDateInWindow(slot.day, now));
+                const occDate = fmtDate(occDateInWindow(slot.day));
                 if ((slot.attendance || {})[occDate] === 'completed') {
                     packageTypeCounts[m.type] = (packageTypeCounts[m.type] || 0) + 1;
                 }
+            });
+        });
+
+        // Tüm hocaları içeren değişmez görüntü + yapısal kayıt (üye silinse bile korunur)
+        const cellEntries = buildCellEntries('all');
+        const tableHtml = sanitizeArchivedTable(scheduleTableHtml(cellEntries, getAllTimeSlots()));
+        const entries = [];
+        Object.keys(cellEntries).forEach(k => {
+            const [day, time] = k.split('|');
+            cellEntries[k].forEach(e => {
+                let status = e.attendance || (e.moved ? 'moved' : e.postponed ? 'postponed' : e.frozen ? 'frozen' : 'pending');
+                entries.push({
+                    memberId: e.memberId, name: e.memberName, type: e.type, day, time,
+                    instructor: getInstructorName(e.instructorId), date: e.occDate,
+                    status, movedTo: e.movedTo || '', movedLesson: !!e.virtual
+                });
             });
         });
 
@@ -2201,26 +2341,37 @@
             id: uid('pw'),
             name: weekName,
             date: todayStr(),
+            weekStart: fmtDate(start),
+            weekEnd: endStr,
             closedAt: new Date().toISOString(),
             closedByRole: role,
-            tableHtml: sanitizeArchivedTable(document.getElementById('schedTable').innerHTML),
+            tableHtml: tableHtml,
+            entries: entries,
             packageCounts: packageTypeCounts
         });
 
+        // Kapanan haftaya ait (tarihi <= hafta sonu) kayıtları temizle
         members.forEach(m => {
             (m.schedule || []).forEach(slot => {
-                slot.attendance = {};
-                slot.deducted = {};
-                if (slot.override) delete slot.override;
-                if (slot.postponedOccDate) delete slot.postponedOccDate;
+                Object.keys(slot.attendance || {}).forEach(d => { if (d <= endStr) delete slot.attendance[d]; });
+                Object.keys(slot.deducted || {}).forEach(d => { if (d <= endStr) delete slot.deducted[d]; });
+                if (slot.override && (!slot.override.forOccDate || slot.override.forOccDate <= endStr)) delete slot.override;
+                if (slot.postponedOccDate && slot.postponedOccDate <= endStr) delete slot.postponedOccDate;
             });
         });
 
+        // Yeni haftaya geç (geç kapatıldıysa bugünkü haftaya atla)
+        let next = new Date(start); next.setDate(next.getDate() + 7);
+        const cur = mondayOf(new Date());
+        if (cur > next) next = cur;
+        weekState = { start: fmtDate(next) };
+
         savePastWeeks();
         saveMembers();
-        alert(`Hafta başarıyla kapatıldı ve Geçmiş Haftalar sekmesine kaydedildi!`);
+        saveWeekState();
+        alert(`Hafta kaydedildi ve Geçmiş Haftalar sekmesine eklendi.\nYeni hafta: ${weekRangeText(next)}`);
         renderCurrentView();
-    });
+    }
 
     function renderPastSplitView() {
         const isOwner = role === 'sahibi';
@@ -2342,7 +2493,7 @@
         renderPastSplitView();
     };
 
-    /* DEMO PROGRAMI & GÜN SIFIRLAMA BUTONLARI */
+    /* DEMO/BOŞLUK & GÜN SIFIRLAMA BUTONLARI */
     function renderDemoGrid() {
         const times = getAllTimeSlots();
         const table = document.getElementById('demoTable');
@@ -2477,7 +2628,7 @@
     window.openDemoAddModal = function(day, time, instructorId) {
         document.getElementById('d-name').value = '';
         document.getElementById('d-phone').value = '';
-        document.getElementById('d-date').value = fmtDate(occDateInWindow(day, new Date()));
+        document.getElementById('d-date').value = fmtDate(occDateInWindow(day));
         document.getElementById('d-instructor').innerHTML = instructors.map(i => `<option value="${i.id}" ${i.id === instructorId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`).join('');
         document.getElementById('d-time').innerHTML = getAllTimeSlots().map(t => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join('');
         openPanel('demoAddPanel');
@@ -2787,7 +2938,7 @@
             if (excludeMemberId && m.id === excludeMemberId) return;
             const mCap = CAPACITY[m.type] || 1;
             (m.schedule || []).forEach(s => {
-                const slotOcc = fmtDate(occDateInWindow(s.day, now));
+                const slotOcc = fmtDate(occDateInWindow(s.day));
                 const moved = !!(s.override && s.override.active && s.override.forOccDate === slotOcc);
 
                 if (s.day === day && s.time === time && s.instructorId === instructorId) {
@@ -2974,16 +3125,21 @@
         const occDate = entry.dataset.occDate;
         const isVirtual = entry.dataset.virtual === '1';
 
-        if (isVirtual) {
-            vcContext = { memberId, slotId };
-            openPanel('virtualCancelPanel');
-            return;
-        }
+        const isMovedOrig = entry.dataset.moved === '1';
 
         const m = members.find(x => x.id === memberId);
         if (!m) return;
         const slot = (m.schedule || []).find(s => s.id === slotId);
         if (!slot) return;
+
+        if (isVirtual || isMovedOrig) {
+            vcContext = { memberId, slotId, occDate };
+            const ov = slot.override || {};
+            document.getElementById('vcSub').textContent = `${m.name}: ${slot.day} ${slot.time} → ${ov.day} ${ov.time} (${getInstructorName(ov.instructorId || slot.instructorId)}) · sadece bu hafta`;
+            document.getElementById('vcUndoBtn').style.display = (slot.attendance || {})[occDate] ? 'block' : 'none';
+            openPanel('virtualCancelPanel');
+            return;
+        }
 
         eaContext = { memberId, slotId, occDate };
         document.getElementById('entryActionTitle').textContent = m.name;
@@ -2993,6 +3149,7 @@
 
         const isFrozen = m.frozenUntil && todayStr() <= m.frozenUntil;
         document.getElementById('eaUnfreezeBtn').style.display = isFrozen ? 'block' : 'none';
+        document.getElementById('eaUndoBtn').style.display = (slot.attendance || {})[occDate] ? 'block' : 'none';
         document.getElementById('eaFreezeBtn').style.display = isFrozen ? 'none' : 'block';
 
         openPanel('entryActionPanel');
@@ -3010,14 +3167,12 @@
         render();
     });
 
-    document.getElementById('eaUndoBtn').addEventListener('click', () => {
-        if (!eaContext) return;
-        const m = members.find(x => x.id === eaContext.memberId);
+    function undoAttendanceFor(memberId, slotId, date) {
+        const m = members.find(x => x.id === memberId);
         if (!m) return;
-        const slot = (m.schedule || []).find(s => s.id === eaContext.slotId);
+        const slot = (m.schedule || []).find(s => s.id === slotId);
         if (!slot) return;
 
-        const date = eaContext.occDate;
         const currentAtt = (slot.attendance || {})[date];
         if (!currentAtt) return alert('Bu ders için henüz yapılmış bir yoklama yok.');
 
@@ -3043,6 +3198,15 @@
             renderScheduleGrid();
             render();
         }
+    }
+
+    document.getElementById('eaUndoBtn').addEventListener('click', () => {
+        if (!eaContext) return;
+        undoAttendanceFor(eaContext.memberId, eaContext.slotId, eaContext.occDate);
+    });
+    document.getElementById('vcUndoBtn').addEventListener('click', () => {
+        if (!vcContext) return;
+        undoAttendanceFor(vcContext.memberId, vcContext.slotId, vcContext.occDate);
     });
 
     document.getElementById('entryActionCloseBtn').addEventListener('click', closeAllPanels);
@@ -3057,17 +3221,29 @@
         const m = members.find(x => x.id === eaContext.memberId);
         const slot = m && (m.schedule || []).find(s => s.id === eaContext.slotId);
         if (!slot) return;
-        slot.postponedOccDate = fmtDate(occDateInWindow(slot.day, new Date()));
+        const pOcc = fmtDate(occDateInWindow(slot.day));
+        if ((slot.attendance || {})[pOcc]) return alert('Bu derse tik/çarpı atılmış. Önce "Yoklamayı Geri Al" yapın.');
+        slot.postponedOccDate = pOcc;
         saveMembers();
         closeAllPanels();
         renderScheduleGrid();
     });
 
     document.getElementById('eaChangeBtn').addEventListener('click', () => {
+        if (!eaContext) return;
+        const m = members.find(x => x.id === eaContext.memberId);
+        const slot = m && (m.schedule || []).find(s => s.id === eaContext.slotId);
+        if (!slot) return;
+        if ((slot.attendance || {})[eaContext.occDate]) {
+            return alert('Bu derse tik/çarpı atılmış. Taşımadan önce "Yoklamayı Geri Al" yapın.');
+        }
         document.getElementById('entryActionMenu').style.display = 'none';
-        document.getElementById('ea-new-day').innerHTML = DAY_ORDER.map(d => `<option>${d}</option>`).join('');
-        document.getElementById('ea-new-time').value = '10:00';
-        document.getElementById('ea-new-instructor').innerHTML = instructors.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
+        document.getElementById('ea-new-day').innerHTML = DAY_ORDER.map(d => `<option ${d === slot.day ? 'selected' : ''}>${d}</option>`).join('');
+        // Tabloda yalnızca tam saatler gösterildiği için saat seçimi listeden yapılır
+        let times = getAllTimeSlots();
+        if (!times.includes(slot.time)) times = times.concat([slot.time]).sort();
+        document.getElementById('ea-new-time').innerHTML = times.map(t => `<option value="${t}" ${t === slot.time ? 'selected' : ''}>${t}</option>`).join('');
+        document.getElementById('ea-new-instructor').innerHTML = instructors.map(i => `<option value="${i.id}" ${i.id === slot.instructorId ? 'selected' : ''}>${escapeHtml(i.name)}</option>`).join('');
         document.getElementById('entryChangeForm').style.display = 'block';
     });
 
@@ -3082,7 +3258,13 @@
         const newTime = document.getElementById('ea-new-time').value || '10:00';
         const newInst = document.getElementById('ea-new-instructor').value;
 
-        if (!checkCapacityLimit(newDay, newTime, newInst, m.type, m.id, fmtDate(occDateInWindow(newDay, new Date())))) {
+        const origOcc = fmtDate(occDateInWindow(slot.day));
+        if ((slot.attendance || {})[origOcc]) return alert('Bu derse tik/çarpı atılmış. Önce "Yoklamayı Geri Al" yapın.');
+        if (newDay === slot.day && newTime === slot.time && newInst === slot.instructorId) {
+            return alert('Yeni gün/saat/hoca mevcut seansla aynı. Lütfen farklı bir seçim yapın.');
+        }
+
+        if (!checkCapacityLimit(newDay, newTime, newInst, m.type, m.id, fmtDate(occDateInWindow(newDay)))) {
             alert(`Ders Programı Dolu!\nSeçtiğiniz gün/saatte bu hocanın kontenjanı dolu (demo ve taşınan dersler dahil) veya paket türü uyumsuz, ders taşınamaz.`);
             return;
         }
@@ -3092,7 +3274,7 @@
             day: newDay,
             time: newTime,
             instructorId: newInst,
-            forOccDate: fmtDate(occDateInWindow(slot.day, new Date()))
+            forOccDate: origOcc
         };
 
         saveMembers();
@@ -3105,6 +3287,9 @@
         if (!vcContext) return;
         const m = members.find(x => x.id === vcContext.memberId);
         const slot = m && (m.schedule || []).find(s => s.id === vcContext.slotId);
+        if (slot && (slot.attendance || {})[vcContext.occDate]) {
+            return alert('Bu derse tik/çarpı atılmış. Önce "Yoklamayı Geri Al" yapın, sonra taşımayı iptal edin.');
+        }
         if (slot && slot.override) delete slot.override;
         saveMembers();
         closeAllPanels();
