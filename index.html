@@ -1123,21 +1123,14 @@
         const [y, m, d] = str.split('-').map(Number);
         return new Date(y, m - 1, d);
     }
-    // Gösterilen hafta = bugünün içinde bulunduğu Pazartesi–Pazar haftası (hafta içinde kaymaz).
-    // weekOverride yalnızca "haftayı kaydet" sırasında, seçilen Pazartesi haftası için geçici kullanılır.
     let weekOverride = null;
-    // weekAnchor: ekranda gösterilen (henüz kaydedilmemiş) haftanın Pazartesi'si. Sadece "Haftayı Bitir ve Kaydet" ile ilerler;
-    // takvimde hafta değişse bile (ör. Pazar'ı unutup Pazartesi kaydederken) eski hafta olduğu gibi ekranda kalır.
     let weekAnchor = null;
     function getWeekStartDate() {
         if (weekOverride) return parseDateStr(weekOverride);
-        return (weekAnchor && weekAnchor.start) ? parseDateStr(weekAnchor.start) : mondayOf(new Date());
+        return mondayOf(new Date());
     }
     function ensureWeekAnchor() {
-        if (!weekAnchor || !weekAnchor.start) {
-            weekAnchor = { start: fmtDate(mondayOf(new Date())) };
-            saveWeekAnchor();
-        }
+        weekAnchor = { start: fmtDate(mondayOf(new Date())) };
     }
     function occDateInWindow(dayName) {
         const idx = DAY_ORDER.indexOf(dayName);
@@ -1228,8 +1221,6 @@
         b.textContent = msg;
     }
 
-    // Kendi yazdığımız kayıtların realtime "yankısını" yok say: hızlı arka arkaya tiklerde
-    // eski bir yankı yerel veriyi ezip sonraki kayıtta tikleri kaybettirmesin.
     const recentWrites = {};
     function canonJson(v) {
         const norm = x => Array.isArray(x) ? x.map(norm)
@@ -1264,7 +1255,6 @@
         const sb = getSupabase();
         if (!sb) return;
 
-        // İlk yükleme başarısız olduysa buluttaki veriyi eksik/boş veriyle ezmemek için buluta yazma
         if (!cloudReady) {
             console.warn('Bulut hazır değil, kayıt yalnızca yerelde tutuldu:', key);
             showSyncWarning('⚠️ Sunucu bağlantısı yok. Değişiklikler buluta KAYDEDİLMİYOR. Bağlantıyı kontrol edip sayfayı yenileyin.');
@@ -1321,7 +1311,6 @@
                     if (dbMap['instructors'] && Array.isArray(dbMap['instructors']) && dbMap['instructors'].length > 0) instructors = dbMap['instructors'];
                     if (dbMap['demos']) demos = dbMap['demos'];
                     if (dbMap['pastWeeks']) pastWeeks = dbMap['pastWeeks'];
-                    if (dbMap['weekAnchor'] && dbMap['weekAnchor'].start) weekAnchor = dbMap['weekAnchor'];
                     if (dbMap['pastMonths']) pastMonths = dbMap['pastMonths'];
                     if (dbMap['lessonLog']) lessonLog = dbMap['lessonLog'];
                     if (dbMap['extraRevenue']) extraRevenueLog = dbMap['extraRevenue'];
@@ -1378,7 +1367,6 @@
         } catch (e) {}
         try { demos = JSON.parse(localStorage.getItem('app_demos') || '[]'); } catch (e) { demos = []; }
         try { pastWeeks = JSON.parse(localStorage.getItem('app_pastWeeks') || '[]'); } catch (e) { pastWeeks = []; }
-        try { const wa = JSON.parse(localStorage.getItem('app_weekAnchor') || 'null'); if (wa && wa.start) weekAnchor = wa; } catch (e) {}
         try { pastMonths = JSON.parse(localStorage.getItem('app_pastMonths') || '[]'); } catch (e) { pastMonths = []; }
         try { lessonLog = JSON.parse(localStorage.getItem('app_lessonLog') || '[]'); } catch (e) { lessonLog = []; }
         try { extraRevenueLog = JSON.parse(localStorage.getItem('app_extraRevenue') || '[]'); } catch (e) { extraRevenueLog = []; }
@@ -1405,7 +1393,6 @@
                     if (k === 'instructors') instructors = v;
                     if (k === 'demos') demos = v;
                     if (k === 'pastWeeks') pastWeeks = v;
-                    if (k === 'weekAnchor' && v && v.start) weekAnchor = v;
                     if (k === 'pastMonths') pastMonths = v;
                     if (k === 'lessonLog') lessonLog = v;
                     if (k === 'extraRevenue') extraRevenueLog = v;
@@ -1577,7 +1564,6 @@
         document.getElementById('openPriceModalLink').style.display = isOwner ? 'inline-block' : 'none';
         document.getElementById('hocaToolbar').style.display = !isOwner ? 'flex' : 'none';
         
-        // Eğitmende Üye Ekle butonunu gizle (Sadece yöneticide açık)
         document.getElementById('openAddBtn').style.display = isOwner ? 'block' : 'none';
         const endWeekWrap = document.getElementById('endWeekBtn')?.parentElement;
         if (endWeekWrap) endWeekWrap.style.display = isOwner ? 'flex' : 'none';
@@ -2062,7 +2048,6 @@
         return '';
     }
 
-    // Aktif haftanın tüm girdilerini üretir (hoca filtresi parametreyle)
     function buildCellEntries(instFilter) {
         let cellEntries = {};
         function key(d, t) { return d + '|' + t; }
@@ -2083,7 +2068,6 @@
                         slotId: slot.id, occDate: occDate, frozen: isFrozen, moved: isMoved,
                         movedTo: isMoved ? `${(SHORT_DAY[slot.override.day] || slot.override.day)} ${slot.override.time}` : '',
                         postponed: isPostponed,
-                        // Taşınan dersin tik/çarpısı yeni yerinde gösterilir
                         attendance: isMoved ? null : att,
                         showActions: !isMoved && !isPostponed && !isFrozen
                     });
@@ -2238,16 +2222,7 @@
         const slot = (m.schedule || []).find(s => s.id === slotId);
         if (!slot) return;
         if (!slot.attendance) slot.attendance = {};
-        if (slot.attendance[occDate]) return; // aynı ders için çifte yoklamayı engelle
-
-        // Henüz gerçekleşmemiş (gelecek tarihli) derse tik/çarpı atılamaz
-        const actualDate = (slot.override && slot.override.active && slot.override.forOccDate === occDate)
-            ? fmtDate(occDateInWindow(slot.override.day)) : occDate;
-        if (actualDate > todayStr()) {
-            const [, mm, dd] = actualDate.split('-');
-            alert(`Bu ders ${dd}.${mm} tarihinde, henüz gerçekleşmedi. Tik/çarpı dersin gününde veya sonrasında atılabilir.`);
-            return;
-        }
+        if (slot.attendance[occDate]) return;
 
         if (m.frozenUntil) delete m.frozenUntil;
 
@@ -2276,7 +2251,6 @@
             }
         }
 
-        // Seans gerçekten düşüldü mü? (geri alırken fazladan seans eklememek için)
         if (!slot.deducted) slot.deducted = {};
         slot.deducted[occDate] = deducted;
 
@@ -2286,7 +2260,6 @@
         if (currentTab === 'multiStock') renderMultiStock();
     };
 
-    // Arşivlenen haftalık tablodaki canlı butonları ve veri bağlarını temizler
     function sanitizeArchivedTable(html) {
         const tmp = document.createElement('table');
         tmp.innerHTML = html || '';
@@ -2308,7 +2281,6 @@
         return tmp.innerHTML;
     }
 
-    // Tik/çarpı atılmamış (bekleyen) dersleri listeler — tüm hocalar dahil
     function collectUnmarkedEntries() {
         const ce = buildCellEntries('all');
         const out = [];
@@ -2324,14 +2296,12 @@
         return out;
     }
 
-    // Verilen Pazartesi haftası için (tablo/tarih hesapları o haftaya göre) işlem yapar
     function withWeek(startStr, fn) {
         const prev = weekOverride;
         weekOverride = startStr;
         try { return fn(); } finally { weekOverride = prev; }
     }
 
-    // "19", "19.10", "19.10.2026" veya "2026-10-19" yazımlarını kabul eder; Pazartesi olmalı
     function parseMondayInput(input) {
         const str = (input || '').trim();
         const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -2340,7 +2310,6 @@
         else if ((m = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/))) d = new Date(+m[3], +m[2] - 1, +m[1]);
         else if ((m = str.match(/^(\d{1,2})[./-](\d{1,2})$/))) d = new Date(today.getFullYear(), +m[2] - 1, +m[1]);
         else if ((m = str.match(/^(\d{1,2})$/))) {
-            // Sadece gün yazıldıysa: bugüne en yakın, o gün numaralı Pazartesi
             let best = null;
             for (let off = -1; off <= 1; off++) {
                 const c = new Date(today.getFullYear(), today.getMonth() + off, +m[1]);
@@ -2359,7 +2328,7 @@
     let pendingCloseStart = null;
     document.getElementById('endWeekBtn').addEventListener('click', () => {
         if (role !== 'sahibi') return;
-        const def = getWeekStartDate(); // ekrandaki (kaydedilmemiş) haftanın Pazartesi'si
+        const def = getWeekStartDate();
         const input = prompt('Kaydedilecek haftanın PAZARTESİ gününün tarihini yazın.\nÖrnek: 19   veya   19.10.2026', `${def.getDate()}.${def.getMonth() + 1}.${def.getFullYear()}`);
         if (input === null || !input.trim()) return;
         const r = parseMondayInput(input);
@@ -2394,7 +2363,7 @@
         const weekName = `${weekRangeText(start)} Haftası`;
 
         if (pastWeeks.some(w => w.weekStart === startStr) && !confirm(`"${weekName}" daha önce kaydedilmiş. Yine de bir kez daha kaydedilsin mi?`)) return;
-        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nKayıt, tablo görüntüsü olarak saklanır (sonradan üye silinse bile değişmez). Bu haftanın tik/çarpıları kayıttan sonra programdan temizlenir ve bir sonraki hafta açılır.`)) return;
+        if (!confirm(`"${weekName}" programını Geçmiş Haftalar'a kaydetmek istiyor musunuz?\n\nKayıt, tablo görüntüsü olarak saklanır (sonradan üye silinse bile değişmez). Bu haftanın tik/çarpıları kayıttan sonra programdan temizlenir.`)) return;
         const typed = prompt('Onaylamak için BİTİR yazın (iptal için boş bırakın):');
         if (!typed || typed.trim().toLocaleUpperCase('tr-TR') !== 'BİTİR') {
             alert('Hafta kaydedilmedi. Hiçbir şey değiştirilmedi.');
@@ -2413,7 +2382,6 @@
                 });
             });
 
-            // Tüm hocaları içeren değişmez görüntü + yapısal kayıt (üye silinse bile korunur)
             const cellEntries = buildCellEntries('all');
             const tableHtml = sanitizeArchivedTable(scheduleTableHtml(cellEntries, getAllTimeSlots()));
             const entries = [];
@@ -2444,7 +2412,6 @@
             packageCounts: snap.packageTypeCounts
         });
 
-        // Kaydedilen haftaya ait (tarihi <= hafta sonu) tik/çarpı ve taşıma kayıtlarını temizle
         members.forEach(m => {
             (m.schedule || []).forEach(slot => {
                 Object.keys(slot.attendance || {}).forEach(d => { if (d <= endStr) delete slot.attendance[d]; });
@@ -2454,18 +2421,9 @@
             });
         });
 
-        // Ekrandaki hafta kaydedildiyse bir sonraki haftaya geç (sadece kullanıcı kaydedince ilerler)
-        let nextTxt = '';
-        if (!weekAnchor || !weekAnchor.start || startStr >= weekAnchor.start) {
-            const next = new Date(start); next.setDate(next.getDate() + 7);
-            weekAnchor = { start: fmtDate(next) };
-            saveWeekAnchor();
-            nextTxt = `\nYeni hafta: ${weekRangeText(next)}`;
-        }
-
         savePastWeeks();
         saveMembers();
-        alert('Hafta kaydedildi ve Geçmiş Haftalar sekmesine eklendi.' + nextTxt);
+        alert('Hafta kaydedildi ve Geçmiş Haftalar sekmesine eklendi.');
         renderCurrentView();
     }
 
@@ -2630,7 +2588,6 @@
             tbody += `</tr>`;
         });
 
-        // Tablo Altına Gün Sıfırlama Butonları Satırı
         let tfoot = `<tfoot><tr><td style="padding:8px 12px;font-size:12px;font-weight:700;color:var(--ink-soft);background:var(--bg);">Sıfırla:</td>`;
         DAY_ORDER.forEach(day => {
             tfoot += `<td style="padding:6px;text-align:center;">
@@ -2776,7 +2733,6 @@
             const d = perInst[inst.id] || { rev: 0, comm: 0, count: 0 };
             return { id: inst.id, name: inst.name, prim: inst.primPercent ?? 30, rev: d.rev, count: d.count, comm: d.comm };
         });
-        // Silinmiş hocaların dersleri de satır olarak görünsün ki toplamlar tutsun
         Object.keys(perInst).forEach(id => {
             if (instructors.some(i => i.id === id)) return;
             const d = perInst[id];
@@ -3021,9 +2977,6 @@
 
     document.getElementById('addScheduleSlotBtn').addEventListener('click', () => addSlotRow());
 
-    // Slot kapasitesi = slottaki herkesin (ve eklenecek üyenin) paket kapasitelerinin en küçüğü.
-    // Demo seansları ve tek seferlik taşınan dersler de doluluğa sayılır.
-    // occDate verilirse (tek seferlik taşıma) o tarihteki durum kontrol edilir.
     function checkCapacityLimit(day, time, instructorId, targetType, excludeMemberId = null, occDate = null) {
         const now = new Date();
         const today = todayStr();
@@ -3116,7 +3069,6 @@
                 });
                 Object.assign(m, { name, phone, type, remaining, totalSessions, start, schedule: slots });
 
-                // Ücret alanı: son ödeme kaydını güncelle (ders başı hesap buna göre yapılıyor)
                 if (fee > 0) {
                     if (!m.payments) m.payments = [];
                     const lastPay = m.payments[m.payments.length - 1];
@@ -3275,7 +3227,6 @@
         if (confirm(`${m.name} için yapılan yoklamayı geri almak istiyor musunuz?`)) {
             const flag = slot.deducted ? slot.deducted[date] : undefined;
             const logIdx = findLastLessonLogIdx(m.id, date);
-            // Yeni kayıtlarda bayrak kesin bilgi verir; eski kayıtlarda ders logunun varlığına bakılır
             const wasDeducted = (typeof flag === 'boolean') ? flag : (logIdx !== -1);
 
             if (wasDeducted) {
@@ -3335,7 +3286,6 @@
         }
         document.getElementById('entryActionMenu').style.display = 'none';
         document.getElementById('ea-new-day').innerHTML = DAY_ORDER.map(d => `<option ${d === slot.day ? 'selected' : ''}>${d}</option>`).join('');
-        // Tabloda yalnızca tam saatler gösterildiği için saat seçimi listeden yapılır
         let times = getAllTimeSlots();
         if (!times.includes(slot.time)) times = times.concat([slot.time]).sort();
         document.getElementById('ea-new-time').innerHTML = times.map(t => `<option value="${t}" ${t === slot.time ? 'selected' : ''}>${t}</option>`).join('');
