@@ -2109,12 +2109,7 @@
 
     function scheduleTableHtml(cellEntries, times) {
         function key(d, t) { return d + '|' + t; }
-        const ws = getWeekStartDate();
-        const pad = n => String(n).padStart(2, '0');
-        let thead = '<thead><tr><th>Saat</th>' + DAY_ORDER.map((d, i) => {
-            const dt = new Date(ws); dt.setDate(ws.getDate() + i);
-            return `<th>${d}<div class="th-date">${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}</div></th>`;
-        }).join('') + '</tr></thead>';
+        let thead = '<thead><tr><th>Saat</th>' + DAY_ORDER.map(d => `<th>${d}</th>`).join('') + '</tr></thead>';
         let tbody = '<tbody>';
 
         times.forEach(t => {
@@ -2301,6 +2296,7 @@
             sp.textContent = '– İşaretlenmedi';
             n.replaceWith(sp);
         });
+        tmp.querySelectorAll('.th-date').forEach(n => n.remove());
         tmp.querySelectorAll('[onclick]').forEach(n => n.removeAttribute('onclick'));
         tmp.querySelectorAll('.cell-entry').forEach(n => {
             n.removeAttribute('data-member-id');
