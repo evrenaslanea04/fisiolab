@@ -466,6 +466,7 @@
     }
     .att-status.completed { background: #D5E4CA; color: #2E4522; border: 1px solid #BACFB0; }
     .att-status.missed { background: #F8D7DA; color: #842029; border: 1px solid #F5C2C7; }
+    .att-status.nosession { background: #F8D7DA; color: #842029; border: 1px solid #E8A5AC; font-weight: 700; }
     /* Geçmiş hafta detayı: tam ekran, tablo sığdırılmış */
     #weekDetailPanel.panel { width: 100vw; max-width: 100vw; padding: 20px 18px; }
     #weekDetailPanel .snap-wrap {
@@ -2068,6 +2069,7 @@
                         slotId: slot.id, occDate: occDate, frozen: isFrozen, moved: isMoved,
                         movedTo: isMoved ? `${(SHORT_DAY[slot.override.day] || slot.override.day)} ${slot.override.time}` : '',
                         postponed: isPostponed,
+                        noSessions: !(m.remaining > 0),
                         attendance: isMoved ? null : att,
                         showActions: !isMoved && !isPostponed && !isFrozen
                     });
@@ -2081,6 +2083,7 @@
                         cellEntries[k].push({
                             memberId: m.id, memberName: m.name, type: m.type, instructorId: virtInstId,
                             slotId: slot.id, occDate: occDate, frozen: isFrozen, virtual: true,
+                            noSessions: !(m.remaining > 0),
                             attendance: att,
                             showActions: true
                         });
@@ -2123,6 +2126,8 @@
                                 tbody += `<span class="att-status completed">✓ Seans Yapıldı</span>`;
                             } else if (e.attendance === 'missed') {
                                 tbody += `<span class="att-status missed">✗ Gelmedi / Yapılmadı</span>`;
+                            } else if (e.showActions && e.noSessions) {
+                                tbody += `<span class="att-status nosession">⚠ Paket bitti (0 seans)</span>`;
                             } else if (e.showActions) {
                                 tbody += `
                                     <div class="attendance-actions">
@@ -2189,6 +2194,8 @@
                             html += `<span class="att-status completed" style="margin-top:6px;">✓ Seans Yapıldı</span>`;
                         } else if (e.attendance === 'missed') {
                             html += `<span class="att-status missed" style="margin-top:6px;">✗ Ders Yapılmadı / Gelmedi</span>`;
+                        } else if (e.showActions && e.noSessions) {
+                            html += `<span class="att-status nosession" style="margin-top:6px;">⚠ Paket bitti (0 seans) - yoklama alınamaz</span>`;
                         } else if (e.showActions) {
                             html += `
                                 <div class="attendance-actions" style="margin-top:8px;">
@@ -2223,6 +2230,11 @@
         if (!slot) return;
         if (!slot.attendance) slot.attendance = {};
         if (slot.attendance[occDate]) return;
+
+        if (!(m.remaining > 0)) {
+            alert(`⚠ ${m.name} için kalan seans 0! Paket bitmiş olduğundan tik/çarpı işaretlenemez.\nÖnce yeni paket / seans ekleyin.`);
+            return;
+        }
 
         if (m.frozenUntil) delete m.frozenUntil;
 
